@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Final · Statistics</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#93C5FD}a:hover{color:#BFDBFE}
+</style>
+</helmet>
+<div style="width: 1000px; height: 820px; box-sizing: border-box; background: #17191E; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Inter, sans-serif; color: #F3F4F6; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; box-shadow: inset 0 0 0 1px #30343C; -webkit-font-smoothing: antialiased">
+  <div style="height: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid #262A31">
+    <div style="display: flex; align-items: center; gap: 16px">
+      <div style="display: flex; gap: 8px" aria-hidden="true">
+        <span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span>
+        <span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span>
+        <span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span>
+      </div>
+      <span style="font-size: 13px; font-weight: 600">Statistics</span>
+    </div>
+    <div role="group" aria-label="Range" style="display: flex; padding: 3px; border-radius: 9px; background: #1F2228">
+      <sc-for list="{{ ranges }}" as="r" hint-placeholder-count="2">
+        <button type="button" aria-pressed="{{ r.selected }}" onClick="{{ r.pick }}" style="min-width: 58px; height: 28px; border: 0; border-radius: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; font-weight: 700; cursor: pointer; {{ r.style }}">{{ r.label }}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="flex: 1; display: flex; min-height: 0">
+    <nav aria-label="Providers" style="width: 200px; flex-shrink: 0; border-right: 1px solid #262A31; padding: 12px 8px; display: flex; flex-direction: column; gap: 3px">
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="6">
+        <button type="button" aria-pressed="{{ n.selected }}" onClick="{{ n.pick }}" style="height: 40px; border-radius: 9px; padding: 0 10px; font: inherit; font-size: 13px; color: #F3F4F6; text-align: left; display: flex; align-items: center; gap: 10px; cursor: pointer; {{ n.style }}">
+          <span style="position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center">
+            <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" style="position: absolute; top: 0; left: 0"><circle cx="13" cy="13" r="11" stroke="#2A2E36" stroke-width="2.5" fill="none"></circle><circle cx="13" cy="13" r="11" stroke="{{ n.ring }}" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-dasharray="{{ n.dash }}" transform="rotate(-90 13 13)"></circle></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ n.logo }}" fill="#F3F4F6"></path></svg>
+          </span>
+          <span style="flex: 1">{{ n.label }}</span>
+          <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #A1A1AA">{{ n.total }}</span>
+        </button>
+      </sc-for>
+      <div style="margin-top: auto; padding: 10px; font-size: 11px; line-height: 1.45; color: #A1A1AA">Ring = fullest limit right now. Number = tokens in range.</div>
+    </nav>
+
+    <main style="flex: 1; min-width: 0; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; overflow: hidden">
+      <div style="display: flex; align-items: baseline; justify-content: space-between">
+        <h1 style="margin: 0; font-size: 20px; font-weight: 700">{{ heading }}</h1>
+        <span style="font-size: 12px; color: #A1A1AA">{{ rangeText }}</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+        <sc-for list="{{ gauges }}" as="g" hint-placeholder-count="5">
+          <div style="padding: 10px; border-radius: 12px; background: #1F2228; display: flex; align-items: center; gap: 10px">
+            <span style="position: relative; width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center">
+              <svg width="44" height="44" viewBox="0 0 44 44" role="img" aria-label="{{ g.aria }}" style="position: absolute; top: 0; left: 0"><circle cx="22" cy="22" r="18" stroke="#2A2E36" stroke-width="5" fill="none"></circle><circle cx="22" cy="22" r="18" stroke="{{ g.color }}" stroke-width="5" fill="none" stroke-linecap="round" stroke-dasharray="{{ g.dash }}" transform="rotate(-90 22 22)"></circle></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ g.logo }}" fill="#F3F4F6"></path></svg>
+            </span>
+            <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 16px; font-weight: 700; color: {{ g.color }}">{{ g.pctText }}</span>
+              <span style="font-size: 10px; color: #A1A1AA; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ g.label }}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+        <div style="padding: 12px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 10px; color: #A1A1AA; text-transform: uppercase; letter-spacing: 0.06em">Total tokens</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 700">{{ kTotal }}</span></div>
+        <div style="padding: 12px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 10px; color: #A1A1AA; text-transform: uppercase; letter-spacing: 0.06em">In · out · cache</span>
+          <div style="height: 8px; display: flex; gap: 2px; border-radius: 4px; overflow: hidden"><span style="flex: 24 1 0; background: #E4E4E7"></span><span style="flex: 7 1 0; background: #A1A1AA"></span><span style="flex: 69 1 0; background: #52525B"></span></div>
+          <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #D4D4D8">{{ kSplit }}</span></div>
+        <div style="padding: 12px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 10px; color: #A1A1AA; text-transform: uppercase; letter-spacing: 0.06em">Requests</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 700">{{ kReq }}</span></div>
+        <div style="padding: 12px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 10px; color: #A1A1AA; text-transform: uppercase; letter-spacing: 0.06em">Limits hit</span><span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 700; color: #F87171">{{ kHits }}</span></div>
+      </div>
+
+      <section aria-label="Tokens per day" style="padding: 14px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <h2 style="margin: 0; font-size: 13px; font-weight: 600">Tokens per day</h2>
+          <div style="display: flex; gap: 12px">
+            <sc-for list="{{ legend }}" as="lg" hint-placeholder-count="5">
+              <span style="display: flex; align-items: center; gap: 5px; font-size: 11px; color: #D4D4D8"><span style="width: 9px; height: 9px; border-radius: 2px; background: {{ lg.color }}"></span>{{ lg.name }}</span>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <div style="width: 38px; height: 150px; display: flex; flex-direction: column; justify-content: space-between; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: #A1A1AA; text-align: right"><span>{{ yMax }}</span><span>{{ yMid }}</span><span>0</span></div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+            <div style="height: 150px; display: flex; align-items: flex-end; gap: {{ barGap }}; border-bottom: 1px solid #30343C">
+              <sc-for list="{{ bars }}" as="b" hint-placeholder-count="30">
+                <div title="{{ b.tip }}" style="flex: 1; display: flex; flex-direction: column-reverse; gap: 1px; border-radius: 3px 3px 0 0; overflow: hidden">
+                  <sc-for list="{{ b.segs }}" as="s" hint-placeholder-count="5">
+                    <div style="{{ s.style }}"></div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; gap: {{ barGap }}">
+              <sc-for list="{{ bars }}" as="b" hint-placeholder-count="30">
+                <span style="flex: 1; text-align: center; font-size: 10px; color: #A1A1AA; white-space: nowrap">{{ b.label }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; min-height: 0">
+        <section aria-label="Most used models" style="padding: 14px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 7px">
+          <h2 style="margin: 0 0 2px; font-size: 13px; font-weight: 600">Most used models</h2>
+          <sc-for list="{{ models }}" as="m" hint-placeholder-count="5">
+            <div style="display: grid; grid-template-columns: 16px minmax(0, 1fr) 58px 34px; gap: 8px; align-items: center">
+              <svg width="13" height="13" viewBox="0 0 24 24" role="img" aria-label="{{ m.provider }}"><path d="{{ m.logo }}" fill="#F3F4F6"></path></svg>
+              <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+                <span style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ m.name }} <span style="color: #A1A1AA">{{ m.via }}</span></span>
+                <div style="height: 4px; border-radius: 2px; background: #2A2E36"><div style="height: 4px; border-radius: 2px; {{ m.bar }}"></div></div>
+              </div>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-align: right">{{ m.tokens }}</span>
+              <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; text-align: right; color: #A1A1AA">{{ m.share }}</span>
+            </div>
+          </sc-for>
+        </section>
+        <section aria-label="When you work" style="padding: 14px; border-radius: 12px; background: #1F2228; display: flex; flex-direction: column; gap: 8px">
+          <h2 style="margin: 0; font-size: 13px; font-weight: 600">When you use AI</h2>
+          <div style="display: flex; flex-direction: column; gap: 3px">
+            <sc-for list="{{ heat }}" as="row" hint-placeholder-count="7">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 26px; font-size: 10px; color: #A1A1AA">{{ row.day }}</span>
+                <div style="flex: 1; display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px">
+                  <sc-for list="{{ row.cells }}" as="c" hint-placeholder-count="24">
+                    <span style="height: 11px; border-radius: 2px; {{ c.s }}"></span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display: flex; justify-content: space-between; padding-left: 32px; font-size: 10px; color: #A1A1AA"><span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>11 PM</span></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"yellowAt":{"editor":"range","min":30,"max":70,"step":5,"unit":"%","default":50},"redAt":{"editor":"range","min":60,"max":95,"step":5,"unit":"%","default":80},"$preview":{"width":1000,"height":820}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { range: '30d', filter: 'all' };
+  }
+  renderVals() {
+    const LOGOS = {"claude": "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z", "chatgpt": "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z", "cursor": "M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23", "gemini": "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81", "opencode": "M22 24H2V0h20zM17 4.8H7v14.4h10z"};
+    const yAt = this.props.yellowAt ?? 50;
+    const rAt = this.props.redAt ?? 80;
+    const heatC = (p) => (p >= rAt ? '#F87171' : p >= yAt ? '#FACC15' : '#4ADE80');
+    const range = this.state.range;
+    const filter = this.state.filter;
+    const P = [
+      { id: 'claude', name: 'Claude', color: '#E8957A', base: 1.15e6, hits: 3, limits: [['5-hour', 62], ['Weekly', 38], ['Weekly · Opus', 81]], models: [['claude-opus-4.5', 0.62], ['claude-sonnet-4.5', 0.31], ['claude-haiku-4.5', 0.07]] },
+      { id: 'chatgpt', name: 'ChatGPT', color: '#F4F4F5', base: 0.62e6, hits: 1, limits: [['5-hour', 21], ['Weekly', 54]], models: [['gpt-5-codex', 0.78], ['gpt-5', 0.22]] },
+      { id: 'cursor', name: 'Cursor', color: '#71717A', base: 0.36e6, hits: 0, limits: [['Included usage', 67]], models: [['composer-1', 0.55], ['claude-sonnet-4.5', 0.30], ['gpt-5', 0.15]] },
+      { id: 'gemini', name: 'Gemini', color: '#8AB4F8', base: 0.30e6, hits: 0, limits: [['Daily requests', 21]], models: [['gemini-3-pro', 0.64], ['gemini-2.5-flash', 0.36]] },
+      { id: 'opencode', name: 'OpenCode', color: '#A78BFA', base: 0.15e6, hits: 0, limits: [['Credit used', 42]], models: [['kimi-k2', 0.5], ['glm-4.6', 0.3], ['qwen3-coder', 0.2]] }
+    ];
+    const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M' : Math.round(n / 1e3) + 'K';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const N = range === '7d' ? 7 : 30;
+    const today = new Date(2026, 10, 26);
+    const CIRC = (r) => 2 * Math.PI * r;
+    const dash = (pct, r) => (CIRC(r) * pct / 100).toFixed(1) + ' ' + CIRC(r).toFixed(1);
+    const value = (p, pi, abs, dow) => p.base * (0.4 + 0.6 * Math.abs(Math.sin(abs * 1.7 + pi * 2.3))) * ((dow === 0 || dow === 6) ? 0.4 : 1);
+    const visible = P.filter((p) => filter === 'all' || p.id === filter);
+    const days = [];
+    for (let i = 0; i < N; i++) {
+      const back = N - 1 - i;
+      const d = new Date(today.getTime() - back * 86400000);
+      const vals = visible.map((p) => value(p, P.indexOf(p), 60 - back, d.getDay()));
+      days.push({ d, vals, total: vals.reduce((s, v) => s + v, 0) });
+    }
+    const yTop = Math.ceil(Math.max(...days.map((x) => x.total)) / 5e5) * 5e5;
+    const bars = days.map((x, i) => ({
+      tip: months[x.d.getMonth()] + ' ' + x.d.getDate() + ' · ' + fmt(x.total),
+      label: N === 7 ? wd[x.d.getDay()] : (i % 5 === 4 ? months[x.d.getMonth()] + ' ' + x.d.getDate() : ''),
+      segs: x.vals.map((v, k) => ({ style: 'height: ' + Math.max(1, Math.round((v / yTop) * 150)) + 'px; background: ' + visible[k].color }))
+    }));
+    const provTotals = visible.map((p, k) => days.reduce((s, x) => s + x.vals[k], 0));
+    const total = provTotals.reduce((s, v) => s + v, 0);
+    let models = [];
+    visible.forEach((p, k) => p.models.forEach(([name, share]) => models.push({
+      name, provider: p.name, via: (p.id === 'cursor' || p.id === 'opencode') ? 'via ' + p.name : '',
+      tok: provTotals[k] * share, logo: LOGOS[p.id], color: p.color
+    })));
+    models.sort((a, b) => b.tok - a.tok);
+    models = models.slice(0, 5);
+    const topTok = models[0] ? models[0].tok : 1;
+    const modelsOut = models.map((m) => ({ ...m, tokens: fmt(m.tok), share: Math.round((m.tok / total) * 100) + '%', bar: 'width: ' + Math.round((m.tok / topTok) * 100) + '%; background: ' + m.color }));
+    let gauges;
+    if (filter === 'all') {
+      gauges = P.map((p) => {
+        const w = p.limits.reduce((a, b) => (b[1] > a[1] ? b : a));
+        return { logo: LOGOS[p.id], pctText: w[1] + '%', color: heatC(w[1]), dash: dash(w[1], 18), label: p.name + ' · ' + w[0], aria: p.name + ' ' + w[1] + ' percent' };
+      });
+    } else {
+      const p = P.find((x) => x.id === filter);
+      gauges = p.limits.map(([label, pct]) => ({ logo: LOGOS[p.id], pctText: pct + '%', color: heatC(pct), dash: dash(pct, 18), label, aria: label + ' ' + pct + ' percent' }));
+    }
+    const allTotals = P.map((p, pi) => {
+      let s = 0;
+      for (let i = 0; i < N; i++) { const back = N - 1 - i; const d = new Date(today.getTime() - back * 86400000); s += value(p, pi, 60 - back, d.getDay()); }
+      return s;
+    });
+    const overallWorst = Math.max(...P.map((p) => Math.max(...p.limits.map((l) => l[1]))));
+    const nav = [{ id: 'all', label: 'Overview', logo: 'M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z', worst: overallWorst, total: fmt(allTotals.reduce((a, b) => a + b, 0)) }]
+      .concat(P.map((p, pi) => ({ id: p.id, label: p.name, logo: LOGOS[p.id], worst: Math.max(...p.limits.map((l) => l[1])), total: fmt(allTotals[pi]) })))
+      .map((n) => ({
+        ...n, ring: heatC(n.worst), dash: dash(n.worst, 11), selected: filter === n.id ? 'true' : 'false',
+        style: filter === n.id ? 'background: #262A32; border: 1px solid #3F434C' : 'background: transparent; border: 1px solid transparent',
+        pick: () => this.setState({ filter: n.id })
+      }));
+    const ranges = [['7d', '7D'], ['30d', '30D']].map(([id, label]) => ({
+      label, selected: range === id ? 'true' : 'false',
+      style: range === id ? 'background: #3F434C; color: #FFFFFF' : 'background: transparent; color: #A1A1AA',
+      pick: () => this.setState({ range: id })
+    }));
+    const hitsBase = visible.reduce((s, p) => s + p.hits, 0);
+    const hits = range === '7d' ? Math.min(hitsBase, 1) : hitsBase;
+    const heat = [1, 2, 3, 4, 5, 6, 0].map((dow, r) => ({
+      day: wd[dow],
+      cells: Array.from({ length: 24 }, (_, h) => {
+        const work = h >= 9 && h <= 18 ? 1 : h >= 20 && h <= 23 ? 0.55 : h <= 1 ? 0.3 : 0.04;
+        const wk = dow === 0 || dow === 6 ? 0.35 : 1;
+        const v = Math.min(1, work * wk * (0.55 + 0.45 * Math.abs(Math.sin(h * 0.9 + r * 1.3))));
+        return { s: 'background: rgba(244,244,245,' + (0.06 + v * 0.85).toFixed(2) + ')' };
+      })
+    }));
+    const first = days[0].d;
+    return {
+      ranges, nav, bars, gauges, heat, models: modelsOut,
+      legend: visible.map((p) => ({ name: p.name, color: p.color })),
+      heading: filter === 'all' ? 'All subscriptions' : P.find((p) => p.id === filter).name,
+      rangeText: months[first.getMonth()] + ' ' + first.getDate() + ' – Nov 26, 2026',
+      kTotal: fmt(total),
+      kSplit: fmt(total * 0.24) + ' · ' + fmt(total * 0.07) + ' · ' + fmt(total * 0.69),
+      kReq: Math.round(total / 8700).toLocaleString('en-US'),
+      kHits: String(hits),
+      yMax: fmt(yTop), yMid: fmt(yTop / 2),
+      barGap: N === 7 ? '18px' : '4px'
+    };
+  }
+}
+</script>
+</body>
+</html>

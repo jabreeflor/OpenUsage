@@ -1,0 +1,14 @@
+node_modules/
+.env*
+*.mp4
+*.mov
+*.gif
+*.webm
+design/demo/frames/
+design/demo/*.log
+.build/
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+.DS_Store
+evidence/

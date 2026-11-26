@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OpenUsage demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="logos.js"></script>
+<style>
+html,body{margin:0;width:1440px;height:900px;overflow:hidden}
+body{background:#2B3039;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',sans-serif;color:#F3F4F6;-webkit-font-smoothing:antialiased;position:relative}
+.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace}
+#menubar{position:absolute;top:0;left:0;right:0;height:28px;box-sizing:border-box;padding:0 12px;background:rgba(16,18,22,.94);display:flex;align-items:center;justify-content:space-between;font-size:13px;z-index:5}
+#menubar .left{display:flex;gap:18px}
+#menubar .right{display:flex;gap:14px;align-items:center}
+#status{height:22px;padding:0 8px;border-radius:5px;display:flex;gap:10px;align-items:center;font-size:11px;font-weight:700}
+#status.on{background:rgba(255,255,255,.24)}
+#status span{display:flex;gap:3px;align-items:center}
+#layer{position:absolute;inset:0;z-index:4}
+#caption{position:absolute;left:50%;bottom:36px;transform:translateX(-50%);z-index:6;padding:10px 18px;border-radius:999px;background:rgba(10,11,14,.82);color:#F3F4F6;font-size:15px;font-weight:500;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+#cursor{position:absolute;left:0;top:0;z-index:10;pointer-events:none}
+#ripple{position:absolute;z-index:9;border-radius:50%;border:2px solid rgba(255,255,255,.9);pointer-events:none}
+.card{background:#1F2228;border-radius:12px}
+.lbl{font-size:10px;color:#A1A1AA;text-transform:uppercase;letter-spacing:.06em}
+</style>
+</head>
+<body>
+<div id="menubar"></div>
+<div id="layer"></div>
+<div id="caption"></div>
+<div id="ripple"></div>
+<svg id="cursor" width="26" height="30" viewBox="0 0 26 30"><path d="M3 2 L3 24 L8.5 18.8 L12.3 27.5 L16 26 L12.3 17.4 L20 17.4 Z" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+<script>
+const L = window.LOGOS;
+const VARIANT = new URLSearchParams(location.search).get('variant') || 'tiles';
+const yAt = 50, rAt = 80;
+const heat = (p) => (p >= rAt ? '#F87171' : p >= yAt ? '#FACC15' : '#4ADE80');
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const logo = (id, s, fill) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" style="flex-shrink:0"><path d="${L[id]}" fill="${fill}"/></svg>`;
+const ring = (pct, size, r, w, inner) => { const C = 2 * Math.PI * r, c = size / 2; return `<span style="position:relative;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="${size}" height="${size}" style="position:absolute;inset:0"><circle cx="${c}" cy="${c}" r="${r}" stroke="#2A2E36" stroke-width="${w}" fill="none"/><circle cx="${c}" cy="${c}" r="${r}" stroke="${heat(pct)}" stroke-width="${w}" fill="none" stroke-linecap="round" stroke-dasharray="${(C * pct / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 ${c} ${c})"/></svg>${inner}</span>`; };
+
+const DATA = [
+  { id: 'claude', name: 'Claude', plan: 'Max 5x', fill: '#E8957A', today: '800K tok · 148 req', limits: [['5-hour session', 62, 'Resets in 2h 14m'], ['Weekly · all models', 38, 'Resets Tue 9:00 AM'], ['Weekly · Opus', 81, 'Resets Tue 9:00 AM']], models: [['claude-opus-4.5', 71], ['claude-sonnet-4.5', 24], ['claude-haiku-4.5', 5]] },
+  { id: 'chatgpt', name: 'ChatGPT', plan: 'Plus · Codex', fill: '#F3F4F6', today: '395K tok · 97 req', limits: [['5-hour', 21, 'Resets in 4h 02m'], ['Weekly', 54, 'Resets Mon 6:00 AM']], models: [['gpt-5-codex', 82], ['gpt-5', 18]] },
+  { id: 'cursor', name: 'Cursor', plan: 'Pro', fill: '#F3F4F6', today: '271K tok · 64 req', limits: [['Included usage', 67, '$13.40 of $20 · resets Dec 9']], models: [['composer-1', 58], ['claude-sonnet-4.5', 29], ['gpt-5', 13]] },
+  { id: 'gemini', name: 'Gemini', plan: 'Google AI Pro', fill: '#8AB4F8', today: '229K tok · 71 req', limits: [['Daily requests', 21, '312 of 1,500 · resets at midnight']], models: [['gemini-3-pro', 66], ['gemini-2.5-flash', 34]] },
+  { id: 'opencode', name: 'OpenCode', plan: 'Zen', fill: '#F3F4F6', today: '127K tok · 32 req', limits: [['Credit used', 42, '$8.40 of $20 this month']], models: [['kimi-k2', 52], ['glm-4.6', 31], ['qwen3-coder', 17]] }
+];
+const worst = (p) => p.limits.reduce((a, b) => (b[1] > a[1] ? b : a));
+
+/* ---------- menu bar (static) ---------- */
+document.getElementById('menubar').innerHTML = `
+  <div class="left"><b>Finder</b><span>File</span><span>Edit</span><span>View</span><span>Go</span><span>Window</span><span>Help</span></div>
+  <div class="right">
+    <div id="status" class="mono" data-t="status"></div>
+    <svg width="16" height="12" viewBox="0 0 16 12"><path d="M1 4.2a10 10 0 0 1 14 0M3.4 6.6a6.6 6.6 0 0 1 9.2 0M5.8 9a3.2 3.2 0 0 1 4.4 0" stroke="#F3F4F6" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+    <svg width="24" height="12" viewBox="0 0 24 12"><rect x=".75" y=".75" width="20" height="10.5" rx="3" stroke="#F3F4F6" stroke-width="1.2" fill="none"/><rect x="2.5" y="2.5" width="13" height="7" rx="1.5" fill="#F3F4F6"/><rect x="22" y="4" width="1.5" height="4" rx=".75" fill="#F3F4F6"/></svg>
+    <span>Thu Nov 26&nbsp;&nbsp;1:42 PM</span>
+  </div>`;
+const statusEl = document.getElementById('status');
+const ALL_OK = { claude: 'ok', chatgpt: 'ok', cursor: 'ok', gemini: 'ok', opencode: 'ok' };
+let lastStatus = '';
+function renderStatus(conn) {
+  const html = DATA.filter((p) => conn[p.id] !== 'off' && conn[p.id] !== 'connecting-off').map((p) => conn[p.id] === 'ok'
+    ? `<span style="color:${heat(worst(p)[1])}">${logo(p.id, 11, '#fff')}${worst(p)[1]}%</span>`
+    : `<span style="color:#A1A1AA">${logo(p.id, 11, '#A1A1AA')}--</span>`).join('');
+  if (html !== lastStatus) { statusEl.innerHTML = html; lastStatus = html; }
+}
+renderStatus(ALL_OK);
+let SR = statusEl.getBoundingClientRect();
+
+/* ---------- F: gauge tiles popover ---------- */
+function tilesPop(sel, conn = ALL_OK) {
+  const s = DATA.find((p) => p.id === sel);
+  const shades = ['#E4E4E7', '#A1A1AA', '#52525B'];
+  const hours = [2, 1, 0, 0, 1, 3, 6, 8, 7, 9, 10, 6];
+  return `<div style="position:absolute;top:34px;left:${SR.right - 380}px;width:380px;box-sizing:border-box;background:#17191E;border:1px solid #30343C;border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.55);padding:14px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:14px;font-weight:700">Usage</span><span style="font-size:11px;color:#A1A1AA">updated 1 min ago</span></div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+      ${DATA.map((p) => { const w = worst(p), on = p.id === sel; if (conn[p.id] !== 'ok') { const off = conn[p.id] !== 'needs'; return `<div data-t="tile-${p.id}" style="padding:12px 6px 10px;border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:6px;background:#1F2228;border:1px dashed #3F434C">
+        <span style="width:64px;height:64px;border-radius:32px;box-shadow:inset 0 0 0 6px #2A2E36;display:flex;align-items:center;justify-content:center">${logo(p.id, 20, '#71717A')}</span>
+        <span class="mono" style="font-size:17px;font-weight:700;color:#71717A">--</span>
+        <span style="font-size:11px;color:#D4D4D8">${p.name}</span>
+        <span style="font-size:10px;color:${off ? '#A1A1AA' : '#FACC15'}">${off ? 'Not connected' : 'Sign-in expired'}</span></div>`; } return `<div data-t="tile-${p.id}" style="padding:12px 6px 10px;border-radius:12px;display:flex;flex-direction:column;align-items:center;gap:6px;${on ? 'background:#262A32;border:1px solid #52525B' : 'background:#1F2228;border:1px solid transparent'}">
+        ${ring(w[1], 64, 27, 6, logo(p.id, 20, '#F3F4F6'))}
+        <span class="mono" style="font-size:17px;font-weight:700;color:${heat(w[1])}">${w[1]}%</span>
+        <span style="font-size:11px;color:#D4D4D8">${p.name}</span>
+        <span style="font-size:10px;color:#A1A1AA">${w[0].replace('Weekly · ', 'Wk · ')}</span></div>`; }).join('')}
+      <div class="card" style="padding:12px 8px 10px;display:flex;flex-direction:column;justify-content:space-between;gap:6px"><span class="lbl">Today</span><span class="mono" style="font-size:20px;font-weight:700">1.84M</span>
+        <div style="height:26px;display:flex;align-items:flex-end;gap:2px">${hours.map((v) => `<span style="flex:1;border-radius:1px;background:#52525B;height:${Math.max(2, v * 2.6)}px"></span>`).join('')}</div>
+        <span style="font-size:10px;color:#A1A1AA">tokens · 412 requests</span></div>
+    </div>
+    <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">${logo(s.id, 16, '#F3F4F6')}<span style="font-size:13px;font-weight:700">${s.name}</span><span style="font-size:11px;color:#A1A1AA">${s.plan}</span></div>
+      ${s.limits.map(([l, pct, meta]) => `<div style="display:flex;flex-direction:column;gap:4px"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#D4D4D8">${l}</span><span class="mono" style="font-weight:700;color:${heat(pct)}">${pct}%</span></div><div style="height:6px;border-radius:3px;background:#2A2E36"><div style="height:6px;border-radius:3px;width:${pct}%;background:${heat(pct)}"></div></div><span style="font-size:10px;color:#A1A1AA">${meta}</span></div>`).join('')}
+      <div style="border-top:1px solid #30343C;padding-top:10px;display:flex;flex-direction:column;gap:6px">
+        <span class="lbl">Models today · ${s.today.split(' ')[0]} tokens</span>
+        <div style="height:8px;display:flex;gap:2px;border-radius:4px;overflow:hidden">${s.models.map((m, i) => `<span style="flex:${m[1]} 1 0;background:${shades[i]}"></span>`).join('')}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px 12px">${s.models.map((m, i) => `<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#D4D4D8"><span style="width:8px;height:8px;border-radius:2px;background:${shades[i]}"></span>${m[0]} <span style="color:#A1A1AA">${m[1]}%</span></span>`).join('')}</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;padding:0 2px;color:#93C5FD"><span data-t="link-stats" style="padding:2px 0">Statistics</span><span data-t="link-accounts" style="padding:2px 0">Accounts</span><span>Quit</span></div>
+  </div>`;
+}
+
+/* ---------- H: native menu + submenu ---------- */
+function nativeMenu(open, hoverStats) {
+  const sep = '<div style="height:1px;margin:5px 10px;background:rgba(255,255,255,.12)"></div>';
+  const item = (label, key, t, hov) => `<div ${t ? `data-t="${t}"` : ''} style="height:28px;border-radius:5px;padding:0 10px;display:flex;justify-content:space-between;align-items:center;${hov ? 'background:#2F6FEB' : ''}">${label}<span style="color:${hov ? '#E5E7EB' : '#A1A1AA'}">${key}</span></div>`;
+  const left = SR.right - 290;
+  let html = `<div id="mainmenu" style="position:absolute;top:32px;left:${left}px;width:290px;box-sizing:border-box;padding:5px;background:#2A2C31;border-radius:10px;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14),0 16px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;font-size:13px">
+    <div style="height:44px;padding:0 10px;display:flex;flex-direction:column;justify-content:center;gap:2px"><span style="font-weight:700">OpenUsage</span><span style="font-size:11px;color:#A1A1AA">5 subscriptions · updated 1 min ago</span></div>${sep}
+    ${DATA.map((p) => { const w = worst(p)[1], on = open === p.id; return `<div data-t="row-${p.id}" style="height:32px;border-radius:5px;padding:0 8px 0 10px;display:flex;align-items:center;gap:9px;${on ? 'background:#2F6FEB' : ''}">${logo(p.id, 15, '#F3F4F6')}<span style="flex:1">${p.name}</span><span class="mono" style="font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;background:#1A1B1F;color:${heat(w)}">${w}%</span><svg width="8" height="12" viewBox="0 0 8 12"><path d="M2 2l4 4-4 4" stroke="#D4D4D8" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`; }).join('')}
+    ${sep}
+    <div style="padding:6px 10px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#A1A1AA">Today</span><span class="mono" style="font-weight:700">1.84M tok · 412 req</span></div>
+      <div style="height:6px;display:flex;gap:2px;border-radius:3px;overflow:hidden">${[800, 395, 271, 229, 127].map((v, i) => `<span style="flex:${v} 1 0;background:${['#E4E4E7', '#B4B4BB', '#8A8A93', '#64646C', '#4A4A52'][i]}"></span>`).join('')}</div></div>
+    ${sep}${item('Refresh Now', '⌘R')}${item('Open Statistics…', '⌘S', 'link-stats', hoverStats)}${item('Accounts…', '⌘,')}${sep}${item('Quit OpenUsage', '⌘Q')}
+  </div>`;
+  if (open) {
+    const s = DATA.find((p) => p.id === open);
+    const idx = DATA.indexOf(s);
+    const top = 32 + 5 + 44 + 11 + idx * 32 - 5;
+    const topModel = s.models[0][1];
+    html += `<div style="position:absolute;top:${top}px;left:${left - 300 + 4}px;width:300px;box-sizing:border-box;padding:5px;background:#2A2C31;border-radius:10px;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.14),0 16px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;font-size:13px">
+      <div style="padding:8px 10px 6px;display:flex;align-items:center;gap:8px">${logo(s.id, 16, s.fill)}<span style="font-weight:700">${s.name}</span><span style="font-size:11px;color:#A1A1AA">${s.plan}</span></div>
+      ${s.limits.map(([l, pct, meta]) => `<div style="padding:6px 10px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;justify-content:space-between;font-size:12px"><span>${l}</span><span class="mono" style="font-weight:700;color:${heat(pct)}">${pct}%</span></div><div style="height:4px;border-radius:2px;background:#3F4148"><div style="height:4px;border-radius:2px;width:${pct}%;background:${heat(pct)}"></div></div><span style="font-size:11px;color:#A1A1AA">${meta}</span></div>`).join('')}
+      ${sep}
+      <div style="padding:4px 10px 6px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#A1A1AA">Today</span><span class="mono" style="font-weight:700">${s.today}</span></div>
+        ${s.models.map(([n, sh]) => `<div style="display:grid;grid-template-columns:110px 1fr 34px;gap:8px;align-items:center;font-size:11px"><span style="color:#E4E4E7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n}</span><div style="height:4px;border-radius:2px;background:#3F4148"><div style="height:4px;border-radius:2px;background:#D4D4D8;width:${Math.round(sh / topModel * 100)}%"></div></div><span class="mono" style="text-align:right;color:#D4D4D8">${sh}%</span></div>`).join('')}</div>
+      ${sep}${item(`Open ${s.name} usage page`, '')}${item('Mute alerts for today', '')}
+    </div>`;
+  }
+  return html;
+}
+
+/* ---------- I: dark statistics window ---------- */
+function statsWin(range, filter) {
+  const P = [
+    { id: 'claude', name: 'Claude', color: '#E8957A', base: 1.15e6, hits: 3, limits: [['5-hour', 62], ['Weekly', 38], ['Weekly · Opus', 81]], models: [['claude-opus-4.5', .62], ['claude-sonnet-4.5', .31], ['claude-haiku-4.5', .07]] },
+    { id: 'chatgpt', name: 'ChatGPT', color: '#F4F4F5', base: .62e6, hits: 1, limits: [['5-hour', 21], ['Weekly', 54]], models: [['gpt-5-codex', .78], ['gpt-5', .22]] },
+    { id: 'cursor', name: 'Cursor', color: '#71717A', base: .36e6, hits: 0, limits: [['Included usage', 67]], models: [['composer-1', .55], ['claude-sonnet-4.5', .30], ['gpt-5', .15]] },
+    { id: 'gemini', name: 'Gemini', color: '#8AB4F8', base: .30e6, hits: 0, limits: [['Daily requests', 21]], models: [['gemini-3-pro', .64], ['gemini-2.5-flash', .36]] },
+    { id: 'opencode', name: 'OpenCode', color: '#A78BFA', base: .15e6, hits: 0, limits: [['Credit used', 42]], models: [['kimi-k2', .5], ['glm-4.6', .3], ['qwen3-coder', .2]] }
+  ];
+  const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M' : Math.round(n / 1e3) + 'K';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const N = range === '7d' ? 7 : 30;
+  const today = new Date(2026, 10, 26);
+  const value = (p, pi, abs, dow) => p.base * (0.4 + 0.6 * Math.abs(Math.sin(abs * 1.7 + pi * 2.3))) * ((dow === 0 || dow === 6) ? 0.4 : 1);
+  const vis = P.filter((p) => filter === 'all' || p.id === filter);
+  const days = [];
+  for (let i = 0; i < N; i++) { const back = N - 1 - i; const d = new Date(today.getTime() - back * 864e5); const vals = vis.map((p) => value(p, P.indexOf(p), 60 - back, d.getDay())); days.push({ d, vals, total: vals.reduce((a, b) => a + b, 0) }); }
+  const yTop = Math.ceil(Math.max(...days.map((x) => x.total)) / 5e5) * 5e5;
+  const gap = N === 7 ? 18 : 4;
+  const pt = vis.map((p, k) => days.reduce((s, x) => s + x.vals[k], 0));
+  const total = pt.reduce((a, b) => a + b, 0);
+  let models = [];
+  vis.forEach((p, k) => p.models.forEach(([n, sh]) => models.push({ n, p, via: (p.id === 'cursor' || p.id === 'opencode') ? 'via ' + p.name : '', tok: pt[k] * sh })));
+  models.sort((a, b) => b.tok - a.tok); models = models.slice(0, 5);
+  const allT = P.map((p, pi) => { let s = 0; for (let i = 0; i < N; i++) { const back = N - 1 - i; const d = new Date(today.getTime() - back * 864e5); s += value(p, pi, 60 - back, d.getDay()); } return s; });
+  const pw = (p) => Math.max(...p.limits.map((l) => l[1]));
+  const gauges = filter === 'all' ? P.map((p) => { const w = p.limits.reduce((a, b) => (b[1] > a[1] ? b : a)); return { id: p.id, pct: w[1], label: p.name + ' · ' + w[0] }; }) : (() => { const p = P.find((x) => x.id === filter); return p.limits.map(([l, pct]) => ({ id: p.id, pct, label: l })); })();
+  const nav = [{ id: 'all', label: 'Overview', w: Math.max(...P.map(pw)), total: fmt(allT.reduce((a, b) => a + b, 0)) }].concat(P.map((p, i) => ({ id: p.id, label: p.name, w: pw(p), total: fmt(allT[i]) })));
+  const grid = '<svg width="12" height="12" viewBox="0 0 24 24"><path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z" fill="#F3F4F6"/></svg>';
+  const hits = range === '7d' ? Math.min(vis.reduce((s, p) => s + p.hits, 0), 1) : vis.reduce((s, p) => s + p.hits, 0);
+  const first = days[0].d;
+  const heatRows = [1, 2, 3, 4, 5, 6, 0].map((dow, r) => `<div style="display:flex;align-items:center;gap:6px"><span style="width:26px;font-size:10px;color:#A1A1AA">${wd[dow]}</span><div style="flex:1;display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:2px">${Array.from({ length: 24 }, (_, h) => { const work = h >= 9 && h <= 18 ? 1 : h >= 20 && h <= 23 ? .55 : h <= 1 ? .3 : .04; const wk = dow === 0 || dow === 6 ? .35 : 1; const v = Math.min(1, work * wk * (.55 + .45 * Math.abs(Math.sin(h * .9 + r * 1.3)))); return `<span style="height:10px;border-radius:2px;background:rgba(244,244,245,${(.06 + v * .85).toFixed(2)})"></span>`; }).join('')}</div></div>`).join('');
+  return `<div id="statswin" style="position:absolute;top:56px;left:220px;width:1000px;height:748px;box-sizing:border-box;background:#17191E;border-radius:14px;overflow:hidden;box-shadow:inset 0 0 0 1px #30343C,0 30px 80px rgba(0,0,0,.55);display:flex;flex-direction:column">
+    <div style="height:52px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #262A31">
+      <div style="display:flex;align-items:center;gap:16px"><div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:6px;background:#FF5F57"></span><span style="width:12px;height:12px;border-radius:6px;background:#FEBC2E"></span><span style="width:12px;height:12px;border-radius:6px;background:#28C840"></span></div><span style="font-size:13px;font-weight:600">Statistics</span></div>
+      <div style="display:flex;padding:3px;border-radius:9px;background:#1F2228">${[['7d', '7D'], ['30d', '30D']].map(([id, lb]) => `<span data-t="range-${id}" class="mono" style="min-width:58px;height:28px;border-radius:6px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;${range === id ? 'background:#3F434C;color:#fff' : 'color:#A1A1AA'}">${lb}</span>`).join('')}</div>
+    </div>
+    <div style="flex:1;display:flex;min-height:0">
+      <div style="width:200px;flex-shrink:0;border-right:1px solid #262A31;padding:12px 8px;display:flex;flex-direction:column;gap:3px">
+        ${nav.map((n) => `<div data-t="nav-${n.id}" style="height:40px;box-sizing:border-box;border-radius:9px;padding:0 10px;font-size:13px;display:flex;align-items:center;gap:10px;${filter === n.id ? 'background:#262A32;border:1px solid #3F434C' : 'border:1px solid transparent'}">${ring(n.w, 26, 11, 2.5, n.id === 'all' ? grid : logo(n.id, 12, '#F3F4F6'))}<span style="flex:1">${n.label}</span><span class="mono" style="font-size:11px;color:#A1A1AA">${n.total}</span></div>`).join('')}
+      </div>
+      <div style="flex:1;min-width:0;padding:18px 22px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font-size:20px;font-weight:700">${filter === 'all' ? 'All subscriptions' : P.find((p) => p.id === filter).name}</span><span style="font-size:12px;color:#A1A1AA">${months[first.getMonth()]} ${first.getDate()} – Nov 26, 2026</span></div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px">${gauges.map((g) => `<div class="card" style="padding:10px;display:flex;align-items:center;gap:10px">${ring(g.pct, 44, 18, 5, logo(g.id, 14, '#F3F4F6'))}<div style="display:flex;flex-direction:column;gap:1px;min-width:0"><span class="mono" style="font-size:16px;font-weight:700;color:${heat(g.pct)}">${g.pct}%</span><span style="font-size:10px;color:#A1A1AA;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${g.label}</span></div></div>`).join('')}</div>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">
+          <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:4px"><span class="lbl">Total tokens</span><span class="mono" style="font-size:22px;font-weight:700">${fmt(total)}</span></div>
+          <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:6px"><span class="lbl">In · out · cache</span><div style="height:8px;display:flex;gap:2px;border-radius:4px;overflow:hidden"><span style="flex:24 1 0;background:#E4E4E7"></span><span style="flex:7 1 0;background:#A1A1AA"></span><span style="flex:69 1 0;background:#52525B"></span></div><span class="mono" style="font-size:11px;color:#D4D4D8">${fmt(total * .24)} · ${fmt(total * .07)} · ${fmt(total * .69)}</span></div>
+          <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:4px"><span class="lbl">Requests</span><span class="mono" style="font-size:22px;font-weight:700">${Math.round(total / 8700).toLocaleString('en-US')}</span></div>
+          <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:4px"><span class="lbl">Limits hit</span><span class="mono" style="font-size:22px;font-weight:700;color:#F87171">${hits}</span></div>
+        </div>
+        <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;font-weight:600">Tokens per day</span><div style="display:flex;gap:12px">${vis.map((p) => `<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#D4D4D8"><span style="width:9px;height:9px;border-radius:2px;background:${p.color}"></span>${p.name}</span>`).join('')}</div></div>
+          <div style="display:flex;gap:8px"><div class="mono" style="width:38px;height:140px;display:flex;flex-direction:column;justify-content:space-between;font-size:10px;color:#A1A1AA;text-align:right"><span>${fmt(yTop)}</span><span>${fmt(yTop / 2)}</span><span>0</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:6px"><div style="height:140px;display:flex;align-items:flex-end;gap:${gap}px;border-bottom:1px solid #30343C">${days.map((x) => `<div style="flex:1;display:flex;flex-direction:column-reverse;gap:1px;border-radius:3px 3px 0 0;overflow:hidden">${x.vals.map((v, k) => `<div style="height:${Math.max(1, Math.round(v / yTop * 140))}px;background:${vis[k].color}"></div>`).join('')}</div>`).join('')}</div>
+            <div style="display:flex;gap:${gap}px">${days.map((x, i) => `<span style="flex:1;text-align:center;font-size:10px;color:#A1A1AA;white-space:nowrap">${N === 7 ? wd[x.d.getDay()] : (i % 5 === 4 ? months[x.d.getMonth()] + ' ' + x.d.getDate() : '')}</span>`).join('')}</div></div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:10px">
+          <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:7px"><span style="font-size:13px;font-weight:600;margin-bottom:2px">Most used models</span>
+            ${models.map((m) => `<div style="display:grid;grid-template-columns:16px minmax(0,1fr) 58px 34px;gap:8px;align-items:center">${logo(m.p.id, 13, '#F3F4F6')}<div style="display:flex;flex-direction:column;gap:4px;min-width:0"><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.n} <span style="color:#A1A1AA">${m.via}</span></span><div style="height:4px;border-radius:2px;background:#2A2E36"><div style="height:4px;border-radius:2px;width:${Math.round(m.tok / models[0].tok * 100)}%;background:${m.p.color}"></div></div></div><span class="mono" style="font-size:11px;text-align:right">${fmt(m.tok)}</span><span class="mono" style="font-size:11px;text-align:right;color:#A1A1AA">${Math.round(m.tok / total * 100)}%</span></div>`).join('')}
+          </div>
+          <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600">When you use AI</span><div style="display:flex;flex-direction:column;gap:3px">${heatRows}</div>
+            <div style="display:flex;justify-content:space-between;padding-left:32px;font-size:10px;color:#A1A1AA"><span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>11 PM</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------- E: accounts window (dark) ---------- */
+function accountsWin(conn, src, t) {
+  const spin = `<svg width="13" height="13" viewBox="0 0 16 16" style="transform:rotate(${(t * 540) % 360}deg)"><circle cx="8" cy="8" r="6" stroke="rgba(255,255,255,.25)" stroke-width="2" fill="none"/><path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`;
+  const info = { claude: ['Max 5x', 'Signed in with claude.ai'], chatgpt: ['Plus · Codex', 'Signed in with ChatGPT'], cursor: ['Pro', 'Using the Cursor app session on this Mac'], gemini: ['Google AI Pro', 'Signed in with Google'], opencode: ['Zen', 'Signed in with OpenCode'] };
+  const pills = { ok: ['Connected', 'rgba(74,222,128,.14)', '#4ADE80'], needs: ['Needs sign-in', 'rgba(250,204,21,.14)', '#FACC15'], off: ['Off', '#2A2E36', '#A1A1AA'], connecting: ['Connecting…', '#2A2E36', '#D4D4D8'] };
+  const rows = DATA.map((p) => {
+    const c = conn[p.id] === 'connecting-off' ? 'connecting' : conn[p.id];
+    const w = worst(p)[1];
+    const how = c === 'ok' ? info[p.id][1] : c === 'needs' ? 'Sign-in expired yesterday' : c === 'connecting' ? 'Finish signing in in your browser…' : 'Not connected';
+    const plan = (c === 'ok' || c === 'needs' || p.id === 'gemini') ? info[p.id][0] : '';
+    const icon = c === 'ok' ? ring(w, 40, 16, 4, logo(p.id, 15, '#F3F4F6')) : `<span style="width:40px;height:40px;flex-shrink:0;border-radius:20px;box-shadow:inset 0 0 0 4px #2A2E36;display:flex;align-items:center;justify-content:center">${logo(p.id, 15, '#71717A')}</span>`;
+    const btn = c === 'ok' ? ['Sign out', 'background:transparent;border:1px solid #3F434C;color:#D4D4D8'] : c === 'connecting' ? [spin + 'Waiting', 'background:#262A32;border:1px solid #3F434C;color:#A1A1AA'] : [c === 'needs' ? 'Reconnect' : 'Sign in', 'background:#F4F4F5;border:1px solid #F4F4F5;color:#17191E'];
+    const [pl, pb, pc] = pills[c];
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #262A31">${icon}
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;font-weight:600">${p.name} <span style="font-weight:400;color:#A1A1AA">${plan}</span></span><span style="font-size:11px;color:#A1A1AA">${how}</span></div>
+      ${c === 'ok' ? `<span class="mono" style="font-size:12px;font-weight:700;color:${heat(w)};width:40px;text-align:right">${w}%</span>` : '<span style="width:40px"></span>'}
+      <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:${pb};color:${pc};min-width:84px;text-align:center">${pl}</span>
+      <div data-t="btn-${p.id}" style="width:104px;height:30px;box-sizing:border-box;border-radius:7px;font-size:12px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px;${btn[1]}">${btn[0]}</div></div>`;
+  }).join('');
+  const sources = [['claude', 'Claude Code', '~/.claude/projects', true], ['chatgpt', 'Codex CLI', '~/.codex/sessions', true], ['gemini', 'Gemini CLI', '~/.gemini/tmp', true], ['opencode', 'OpenCode', '~/.local/share/opencode', src], ['cursor', 'Cursor', 'from your Cursor account', true]];
+  const box = (id, on) => `<span data-t="src-${id}" style="width:16px;height:16px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;${on ? 'background:#2563EB' : 'box-shadow:inset 0 0 0 1.5px #52525B'}">${on ? '<svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 5.2l2 2 4-4.4" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}</span>`;
+  const tab = (label, on, path) => `<div style="width:84px;height:48px;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;${on ? 'background:#262A32;color:#F3F4F6;font-weight:600' : 'color:#A1A1AA'}"><svg width="18" height="18" viewBox="0 0 16 16"><path d="${path}" stroke="${on ? '#F3F4F6' : '#A1A1AA'}" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>${label}</div>`;
+  const chip = (c, txt) => `<span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:4px;background:${c}"></span>${txt}</span>`;
+  const field = (v) => `<span class="mono" style="padding:3px 7px;border-radius:6px;background:#262A32;border:1px solid #3F434C;color:#F3F4F6">${v}%</span>`;
+  return `<div style="position:absolute;top:96px;left:330px;width:780px;box-sizing:border-box;background:#17191E;border-radius:14px;overflow:hidden;box-shadow:inset 0 0 0 1px #30343C,0 30px 80px rgba(0,0,0,.55);display:flex;flex-direction:column">
+    <div style="padding:10px 16px 8px;border-bottom:1px solid #262A31;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px"><span data-t="win-close" style="width:12px;height:12px;border-radius:6px;background:#FF5F57"></span><span style="width:12px;height:12px;border-radius:6px;background:#FEBC2E"></span><span style="width:12px;height:12px;border-radius:6px;background:#28C840"></span><span style="flex:1;text-align:center;font-size:13px;font-weight:600;margin-right:52px">Accounts</span></div>
+      <div style="display:flex;justify-content:center;gap:4px">${tab('General', false, 'M8 5.8a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4')}${tab('Accounts', true, 'M8 2.7a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6zM2.5 14c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4')}${tab('Alerts', false, 'M4 11V7a4 4 0 0 1 8 0v4l1.2 1.5H2.8zM6.5 14a1.6 1.6 0 0 0 3 0')}</div>
+    </div>
+    <div style="padding:18px 22px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:8px"><span class="lbl">Subscriptions</span><div class="card" style="overflow:hidden">${rows}</div></div>
+      <div style="display:flex;flex-direction:column;gap:8px"><span class="lbl">Count tokens from local tools</span>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 24px">${sources.map(([id, n, pth, on]) => `<div style="display:flex;align-items:flex-start;gap:10px;font-size:12px;padding:2px 0">${box(id, on)}<span style="display:flex;flex-direction:column;gap:1px"><span style="font-weight:500">${n}</span><span class="mono" style="font-size:11px;color:#A1A1AA">${pth}</span></span></div>`).join('')}</div></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-top:12px;border-top:1px solid #262A31;font-size:12px;color:#D4D4D8">
+        <div style="display:flex;align-items:center;gap:14px"><span style="color:#A1A1AA">Colors</span>${chip('#4ADE80', 'Green below yellow')}${chip('#FACC15', 'Yellow from')}${field(50)}${chip('#F87171', 'Red from')}${field(80)}</div>
+        <span style="font-size:11px;color:#A1A1AA">Credentials stay in your Keychain</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------- timelines ---------- */
+const SCRIPTS = {
+  tiles: {
+    duration: 22,
+    pops: [[2.3, 11.0]], stats: [[11.05, 999]], acct: [],
+    state: (t) => ({ sel: t < 5 ? 'claude' : t < 7 ? 'chatgpt' : t < 9 ? 'cursor' : 'claude', range: t < 13.8 ? '30d' : '7d', filter: t < 16.2 ? 'all' : t < 19 ? 'claude' : 'all' }),
+    moves: [[1.2, 2.2, 'status'], [4.0, 4.8, 'tile-chatgpt'], [6.2, 6.9, 'tile-cursor'], [8.2, 8.9, 'tile-claude'], [10.0, 10.8, 'link-stats'], [12.8, 13.6, 'range-7d'], [15.2, 16.0, 'nav-claude'], [18.0, 18.8, 'nav-all'], [19.8, 20.8, { x: 1240, y: 720 }]],
+    clicks: [2.3, 5.0, 7.0, 9.0, 11.0, 13.8, 16.2, 19.0],
+    captions: [[0.4, 3.9, 'Click the menu bar — every subscription, colored by how full it is'], [4.0, 10.0, 'Pick a provider to see its limits and today’s models'], [11.2, 15.0, 'Statistics: tokens per day, top models, limits hit'], [15.3, 21.6, 'Filter to a single provider']]
+  },
+  menu: {
+    duration: 22.5,
+    pops: [[2.3, 11.4]], stats: [[11.45, 999]], acct: [],
+    state: (t) => ({ open: t < 4.0 ? null : t < 6.0 ? 'claude' : t < 7.6 ? 'chatgpt' : t < 9.2 ? 'cursor' : t < 10.5 ? 'gemini' : null, hoverStats: t >= 10.75, range: t < 14.2 ? '30d' : '7d', filter: t < 16.6 ? 'all' : t < 19.4 ? 'claude' : 'all' }),
+    moves: [[1.2, 2.2, 'status'], [3.2, 3.9, 'row-claude'], [5.4, 5.9, 'row-chatgpt'], [7.0, 7.5, 'row-cursor'], [8.6, 9.1, 'row-gemini'], [10.2, 10.9, 'link-stats'], [13.2, 14.0, 'range-7d'], [15.6, 16.4, 'nav-claude'], [18.4, 19.2, 'nav-all'], [20.2, 21.2, { x: 1240, y: 720 }]],
+    clicks: [2.3, 11.4, 14.2, 16.6, 19.4],
+    captions: [[0.4, 3.4, 'Each logo in the menu bar shows its fullest limit'], [3.6, 10.8, 'Hover a provider: limits, reset times, today’s models'], [11.6, 15.4, 'Open Statistics…'], [15.7, 22.1, 'Filter to a single provider']]
+  },
+  accounts: {
+    duration: 24,
+    pops: [[2.0, 5.0], [17.4, 999]], stats: [], acct: [[5.05, 15.9]],
+    state: (t) => ({ sel: t < 19.9 ? 'claude' : 'gemini', src: t >= 13.3, conn: { claude: 'ok', chatgpt: 'ok', cursor: 'ok', gemini: t < 7.4 ? 'needs' : t < 9.0 ? 'connecting' : 'ok', opencode: t < 10.4 ? 'off' : t < 12.0 ? 'connecting-off' : 'ok' } }),
+    moves: [[1.0, 1.9, 'status'], [3.9, 4.8, 'link-accounts'], [6.4, 7.2, 'btn-gemini'], [9.4, 10.2, 'btn-opencode'], [12.4, 13.1, 'src-opencode'], [14.9, 15.7, 'win-close'], [16.4, 17.2, 'status'], [19.0, 19.7, 'tile-gemini'], [22.0, 23.0, { x: 1000, y: 720 }]],
+    clicks: [2.0, 5.0, 7.4, 10.4, 13.3, 15.9, 17.4, 19.9],
+    captions: [[0.3, 4.8, 'Gemini’s sign-in expired and OpenCode isn’t connected yet'], [5.2, 9.2, 'Accounts: reconnect Gemini'], [9.4, 12.2, 'Sign in to OpenCode'], [12.4, 15.7, 'Count OpenCode tokens from its local logs'], [16.2, 23.7, 'Back in the menu bar — all five subscriptions are live']]
+  }
+};
+const S = SCRIPTS[VARIANT];
+const POS = {};
+const layer = document.getElementById('layer');
+const cap = document.getElementById('caption');
+const cur = document.getElementById('cursor');
+const rip = document.getElementById('ripple');
+const winP = (iv, t, inD, outD) => { let v = 0; for (const [o, c] of iv) { if (t < o) continue; v = Math.max(v, t < c ? ease(clamp((t - o) / inD)) : 1 - clamp((t - c) / outD)); } return v; };
+
+function renderAt(t) {
+  const st = S.state(t);
+  const conn = st.conn || ALL_OK;
+  renderStatus(conn);
+  SR = statusEl.getBoundingClientRect();
+  const pop = winP(S.pops, t, 0.2, 0.14);
+  const stats = winP(S.stats, t, 0.3, 0.2);
+  const acct = winP(S.acct, t, 0.3, 0.18);
+  let html = '';
+  if (pop > 0) html += `<div style="opacity:${pop};transform:translateY(${(1 - pop) * -6}px)">${VARIANT === 'menu' ? nativeMenu(st.open, st.hoverStats) : tilesPop(st.sel, conn)}</div>`;
+  if (stats > 0) html += `<div style="opacity:${stats};transform-origin:720px 450px;transform:scale(${0.96 + 0.04 * stats})">${statsWin(st.range, st.filter)}</div>`;
+  if (acct > 0) html += `<div style="opacity:${acct};transform-origin:720px 400px;transform:scale(${0.96 + 0.04 * acct})">${accountsWin(conn, st.src, t)}</div>`;
+  layer.innerHTML = html;
+  statusEl.classList.toggle('on', pop > 0.5);
+  POS.status = { x: SR.left + SR.width / 2, y: SR.top + SR.height / 2 };
+  layer.querySelectorAll('[data-t]').forEach((el) => { const r = el.getBoundingClientRect(); POS[el.dataset.t] = { x: r.left + Math.min(r.width / 2, 60), y: r.top + r.height / 2 }; });
+  let p = { x: 760, y: 560 };
+  for (const [a, b, tg] of S.moves) {
+    if (t <= a) break;
+    const tgt = typeof tg === 'string' ? (POS[tg] || p) : tg;
+    if (t >= b) { p = tgt; continue; }
+    const k = ease((t - a) / (b - a));
+    p = { x: p.x + (tgt.x - p.x) * k, y: p.y + (tgt.y - p.y) * k };
+    break;
+  }
+  const pressed = S.clicks.some((c) => t >= c - 0.06 && t <= c + 0.1);
+  cur.style.transform = `translate(${p.x - 3}px, ${p.y - 2}px) scale(${pressed ? 0.86 : 1})`;
+  cur.style.transformOrigin = '3px 2px';
+  const rc = S.clicks.find((c) => t >= c && t <= c + 0.45);
+  if (rc !== undefined) { const k = (t - rc) / 0.45; const r = 6 + 18 * k; rip.style.display = 'block'; rip.style.width = rip.style.height = 2 * r + 'px'; rip.style.left = p.x - r - 2 + 'px'; rip.style.top = p.y - r - 2 + 'px'; rip.style.opacity = (1 - k) * 0.8; } else rip.style.display = 'none';
+  const c = S.captions.find(([a, b]) => t >= a && t <= b);
+  if (c) { const fade = Math.min(clamp((t - c[0]) / 0.25), clamp((c[1] - t) / 0.25)); cap.style.display = 'block'; cap.textContent = c[2]; cap.style.opacity = fade; } else cap.style.display = 'none';
+}
+window.renderAt = renderAt;
+window.DURATION = S.duration;
+document.fonts.ready.then(() => {
+  SR = statusEl.getBoundingClientRect();
+  window.ready = true;
+  if (!new URLSearchParams(location.search).has('record')) {
+    const t0 = performance.now();
+    const loop = () => { renderAt(((performance.now() - t0) / 1000) % S.duration); requestAnimationFrame(loop); };
+    loop();
+  }
+});
+</script>
+</body>
+</html>
