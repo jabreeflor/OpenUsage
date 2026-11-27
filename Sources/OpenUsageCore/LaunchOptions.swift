@@ -15,6 +15,7 @@ public struct LaunchOptions: Sendable, Equatable {
     public let statisticsRange: StatisticsRange
     public let snapshotDir: URL?
     public let printWindowFrames: Bool
+    public let dumpTokenSummary: Bool
 
     public init(
         isDemo: Bool = false,
@@ -24,7 +25,8 @@ public struct LaunchOptions: Sendable, Equatable {
         statisticsFilter: StatisticsFilter? = nil,
         statisticsRange: StatisticsRange = .thirtyDays,
         snapshotDir: URL? = nil,
-        printWindowFrames: Bool = false
+        printWindowFrames: Bool = false,
+        dumpTokenSummary: Bool = false
     ) {
         self.isDemo = isDemo
         self.demoScenario = demoScenario
@@ -40,6 +42,7 @@ public struct LaunchOptions: Sendable, Equatable {
         self.statisticsRange = statisticsRange
         self.snapshotDir = snapshotDir
         self.printWindowFrames = printWindowFrames
+        self.dumpTokenSummary = dumpTokenSummary
     }
 
     public static func parse(
@@ -58,6 +61,7 @@ public struct LaunchOptions: Sendable, Equatable {
         var statisticsRange: StatisticsRange = .thirtyDays
         var snapshotDir: URL?
         var printWindowFrames = false
+        var dumpTokenSummary = false
 
         func applySelect(_ rawValue: String) {
             if let parsed = StatisticsFilter(cliValue: rawValue) {
@@ -129,6 +133,9 @@ public struct LaunchOptions: Sendable, Equatable {
             } else if arg == "--print-window-frames" {
                 printWindowFrames = true
                 index += 1
+            } else if arg == "--dump-token-summary" {
+                dumpTokenSummary = true
+                index += 1
             } else {
                 index += 1
             }
@@ -142,7 +149,8 @@ public struct LaunchOptions: Sendable, Equatable {
             statisticsFilter: statisticsFilter,
             statisticsRange: statisticsRange,
             snapshotDir: snapshotDir,
-            printWindowFrames: printWindowFrames
+            printWindowFrames: printWindowFrames,
+            dumpTokenSummary: dumpTokenSummary
         )
     }
 }

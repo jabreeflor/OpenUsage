@@ -17,6 +17,7 @@ final class AppStore: Observable {
     let accounts: AccountsController
 
     private var _tokenBuckets: [TokenBucket]
+    private var _bucketsBySource: [LocalToolSource: [TokenBucket]]
     private var _limitHitEvents: [LimitHitEvent]
     private var _todayUsage: TodayUsageSummary
     private var _selectedTile: DropdownSelection
@@ -27,14 +28,23 @@ final class AppStore: Observable {
     private var _lastRefreshedAt: Date?
 
     private var refreshScheduler: RefreshScheduler?
+    private let tokenLogCoordinator: LocalTokenLogCoordinator?
+    private var localLogPipeline: LocalLogPipelineController?
+    private let watchBackend: (any DirectoryWatchBackend)?
+    private let watchScheduler: any DirectoryWatchScheduler
 
     var snapshots: [ProviderSnapshot] {
         accounts.snapshots
     }
 
     var tokenBuckets: [TokenBucket] {
+        if options.isDemo {
+            _$observationRegistrar.access(self, keyPath: \.tokenBuckets)
+            return _tokenBuckets
+        }
         _$observationRegistrar.access(self, keyPath: \.tokenBuckets)
-        return _tokenBuckets
+        let enabled = localSources.enabledSources
+        return LocalTokenLogCoordinator.activeBuckets(from: _bucketsBySource, enabledSources: enabled)
     }
 
     var limitHitEvents: [LimitHitEvent] {
@@ -43,8 +53,11 @@ final class AppStore: Observable {
     }
 
     var todayUsage: TodayUsageSummary {
-        _$observationRegistrar.access(self, keyPath: \.todayUsage)
-        return _todayUsage
+        if options.isDemo {
+            _$observationRegistrar.access(self, keyPath: \.todayUsage)
+            return _todayUsage
+        }
+        return StatisticsAggregator.todayUsage(from: tokenBuckets, on: Date())
     }
 
     var selectedTile: DropdownSelection {
@@ -102,9 +115,14 @@ final class AppStore: Observable {
         options: LaunchOptions,
         thresholds: ThresholdSettings? = nil,
         localSources: LocalSourceSettings? = nil,
-        providers: [any UsageProvider]? = nil
+        providers: [any UsageProvider]? = nil,
+        tokenLogCoordinator: LocalTokenLogCoordinator? = nil,
+        watchBackend: (any DirectoryWatchBackend)? = nil,
+        watchScheduler: any DirectoryWatchScheduler = DispatchDirectoryWatchScheduler()
     ) {
         self.options = options
+        self.watchBackend = watchBackend
+        self.watchScheduler = watchScheduler
         self.thresholds = thresholds ?? ThresholdSettings.forLaunch(isDemo: options.isDemo)
         self.localSources = localSources ?? LocalSourceSettings.forLaunch(
             isDemo: options.isDemo,
@@ -128,9 +146,11 @@ final class AppStore: Observable {
             let buckets = DemoFixtures.tokenBuckets()
             initialSnapshots = DemoFixtures.snapshots(for: options.demoScenario)
             self._tokenBuckets = buckets
+            self._bucketsBySource = [:]
             self._limitHitEvents = DemoFixtures.limitHitEvents()
             self._todayUsage = DemoFixtures.todayUsage()
             self._lastRefreshedAt = DemoFixtures.referenceDate
+            self.tokenLogCoordinator = nil
         } else {
             initialSnapshots = ProviderID.allCases.map {
                 ProviderSnapshot(
@@ -142,9 +162,11 @@ final class AppStore: Observable {
                 )
             }
             self._tokenBuckets = []
+            self._bucketsBySource = [:]
             self._limitHitEvents = []
             self._todayUsage = .empty
             self._lastRefreshedAt = nil
+            self.tokenLogCoordinator = tokenLogCoordinator ?? LocalTokenLogCoordinator()
         }
 
         self.accounts = AccountsController(
@@ -164,13 +186,33 @@ final class AppStore: Observable {
 
     func statisticsSummary(now: Date = Date()) -> StatisticsSummary {
         let anchorDate = options.isDemo ? DemoFixtures.referenceDate : now
+        let hasLimitData = hasRealLimitData(for: statisticsFilter)
         return StatisticsAggregator.summarize(
             buckets: tokenBuckets,
             limitHits: limitHitEvents,
+            limitsHitAvailable: hasLimitData,
             range: statisticsRange,
             filter: statisticsFilter,
             anchorDate: anchorDate
         )
+    }
+
+    private func hasRealLimitData(for filter: StatisticsFilter) -> Bool {
+        if options.isDemo {
+            return true
+        }
+        let targetProviders: [ProviderID] = switch filter {
+        case .overview: ProviderID.allCases
+        case .provider(let id): [id]
+        }
+        let targetSet = Set(targetProviders)
+        if snapshots.contains(where: { targetSet.contains($0.provider) && $0.connectionState == .connected && !$0.limits.isEmpty }) {
+            return true
+        }
+        if limitHitEvents.contains(where: { targetSet.contains($0.provider) }) {
+            return true
+        }
+        return false
     }
 
     func updatedAgoText(now: Date = Date()) -> String {
@@ -185,7 +227,21 @@ final class AppStore: Observable {
     }
 
     func startRefreshScheduler() {
+        if !options.isDemo {
+            startLocalLogPipeline()
+        }
         refreshScheduler?.start()
+    }
+
+    func toggleLocalSource(_ source: LocalToolSource) {
+        localSources.toggle(source)
+        guard !options.isDemo else { return }
+        let isNowEnabled = localSources.isEnabled(source)
+        Task { [weak self] in
+            guard let self else { return }
+            let pipeline = self.ensureLocalLogPipeline()
+            await pipeline?.handleSourceToggled(isNowEnabled: isNowEnabled)
+        }
     }
 
     func setDropdownOpen(_ isOpen: Bool) {
@@ -207,11 +263,66 @@ final class AppStore: Observable {
         }
 
         await accounts.refreshAll()
+        if !options.isDemo {
+            let pipeline = ensureLocalLogPipeline()
+            await pipeline?.refreshLogs()
+        }
 
         let now = Date()
         _$observationRegistrar.withMutation(of: self, keyPath: \.lastRefreshedAt) {
             _lastRefreshedAt = options.isDemo ? DemoFixtures.referenceDate : now
         }
         refreshScheduler?.recordRefresh(at: now)
+    }
+
+    private func startLocalLogPipeline() {
+        ensureLocalLogPipeline()?.start()
+    }
+
+    private func ensureLocalLogPipeline() -> LocalLogPipelineController? {
+        guard !options.isDemo, let coordinator = tokenLogCoordinator else { return nil }
+        if let existing = localLogPipeline {
+            return existing
+        }
+        let controller = LocalLogPipelineController(
+            coordinator: coordinator,
+            debounceInterval: 0.75,
+            watchBackend: watchBackend,
+            watchScheduler: watchScheduler,
+            enabledSources: { [weak self] in
+                self?.enabledToolSourceSet() ?? []
+            },
+            onBucketsUpdated: { [weak self] updated, refreshedAt in
+                guard let self else { return }
+                self.applyLocalLogBuckets(updated)
+                if let refreshedAt {
+                    self._$observationRegistrar.withMutation(of: self, keyPath: \.lastRefreshedAt) {
+                        self._lastRefreshedAt = refreshedAt
+                    }
+                }
+            }
+        )
+        localLogPipeline = controller
+        return controller
+    }
+
+    private func applyLocalLogBuckets(_ updatedBySource: [LocalToolSource: [TokenBucket]]) {
+        var merged = _bucketsBySource
+        for (source, buckets) in updatedBySource {
+            merged[source] = buckets
+        }
+        _$observationRegistrar.withMutation(of: self, keyPath: \.tokenBuckets) {
+            _bucketsBySource = merged
+        }
+        _$observationRegistrar.withMutation(of: self, keyPath: \.todayUsage) {
+            _todayUsage = StatisticsAggregator.todayUsage(
+                from: LocalTokenLogCoordinator.activeBuckets(from: merged, enabledSources: localSources.enabledSources),
+                on: Date()
+            )
+        }
+    }
+
+    private func enabledToolSourceSet() -> Set<LocalToolSource> {
+        Set(LocalToolSource.allCases.filter { localSources.isEnabled($0) })
     }
 }

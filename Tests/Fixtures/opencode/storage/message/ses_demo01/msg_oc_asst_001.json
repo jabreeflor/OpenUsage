@@ -1,0 +1,20 @@
+{
+  "id": "msg_oc_asst_001",
+  "role": "assistant",
+  "providerID": "opencode",
+  "modelID": "kimi-k2",
+  "time": {
+    "created": 1795701600000,
+    "completed": 1795701605000
+  },
+  "tokens": {
+    "input": 4000,
+    "output": 300,
+    "reasoning": 150,
+    "cache": {
+      "read": 2000,
+      "write": 500
+    },
+    "total": 6950
+  }
+}

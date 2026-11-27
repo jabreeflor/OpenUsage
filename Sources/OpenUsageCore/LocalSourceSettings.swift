@@ -85,6 +85,25 @@ public final class LocalSourceSettings: Observable {
         LocalSourceSettings(defaults: nil, initialValues: defaultMap(for: demoScenario))
     }
 
+    /// Reads the persisted enabled-source set from `UserDefaults` without requiring `@MainActor`.
+    public nonisolated static func persistedEnabledSources(
+        defaults: UserDefaults = .standard
+    ) -> Set<LocalToolSource> {
+        var enabled: Set<LocalToolSource> = []
+        for source in LocalToolSource.allCases {
+            let isOn: Bool
+            if defaults.object(forKey: source.defaultsKey) != nil {
+                isOn = defaults.bool(forKey: source.defaultsKey)
+            } else {
+                isOn = source.defaultEnabled
+            }
+            if isOn {
+                enabled.insert(source)
+            }
+        }
+        return enabled
+    }
+
     /// Creates local-source settings for the current launch mode.
     /// Demo launches start volatile with fixture defaults and never read or write live preferences.
     public static func forLaunch(

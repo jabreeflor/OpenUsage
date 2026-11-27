@@ -14,7 +14,7 @@ public struct TokenBucket: Identifiable, Codable, Sendable, Equatable, Hashable 
     public let requests: Int
 
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheTokens
+        CheckedTokenMath.saturatingSum(inputTokens, outputTokens, cacheTokens)
     }
 
     public init(
@@ -47,7 +47,7 @@ public struct TokenSummary: Codable, Sendable, Equatable {
     public let requests: Int
 
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheTokens
+        CheckedTokenMath.saturatingSum(inputTokens, outputTokens, cacheTokens)
     }
 
     public init(inputTokens: Int = 0, outputTokens: Int = 0, cacheTokens: Int = 0, requests: Int = 0) {
@@ -63,10 +63,10 @@ public struct TokenSummary: Codable, Sendable, Equatable {
         var cache = 0
         var req = 0
         for bucket in buckets {
-            input += bucket.inputTokens
-            output += bucket.outputTokens
-            cache += bucket.cacheTokens
-            req += bucket.requests
+            input = CheckedTokenMath.saturatingAdd(input, bucket.inputTokens)
+            output = CheckedTokenMath.saturatingAdd(output, bucket.outputTokens)
+            cache = CheckedTokenMath.saturatingAdd(cache, bucket.cacheTokens)
+            req = CheckedTokenMath.saturatingAdd(req, bucket.requests)
         }
         return TokenSummary(inputTokens: input, outputTokens: output, cacheTokens: cache, requests: req)
     }

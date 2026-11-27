@@ -20,6 +20,19 @@ enum OpenUsageMain {
             }
         }
 
+        if options.dumpTokenSummary {
+            let semaphore = DispatchSemaphore(value: 0)
+            let isDemo = options.isDemo
+            Task.detached(priority: .userInitiated) {
+                let report = await TokenSummaryDumper.generateReport(isDemo: isDemo)
+                fputs(report, stdout)
+                fflush(stdout)
+                semaphore.signal()
+            }
+            semaphore.wait()
+            Darwin.exit(0)
+        }
+
         OpenUsageApp.main()
     }
 }

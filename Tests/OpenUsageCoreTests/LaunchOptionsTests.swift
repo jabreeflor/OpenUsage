@@ -10,6 +10,7 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertNil(options.selectedProvider)
         XCTAssertNil(options.snapshotDir)
         XCTAssertFalse(options.printWindowFrames)
+        XCTAssertFalse(options.dumpTokenSummary)
     }
 
     func testDemoFlagAndEnvironmentVariable() {
@@ -75,6 +76,7 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertNil(options.selectedProvider)
         XCTAssertNil(options.snapshotDir)
         XCTAssertFalse(options.printWindowFrames)
+        XCTAssertFalse(options.dumpTokenSummary)
     }
 
     func testSelectProviderFlag() {
@@ -136,5 +138,22 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertTrue(parsed.isDemo)
         XCTAssertEqual(parsed.openScreen, .statistics)
         XCTAssertTrue(parsed.printWindowFrames)
+        XCTAssertFalse(parsed.dumpTokenSummary)
+    }
+
+    func testDumpTokenSummaryFlag() {
+        let parsed = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--dump-token-summary"],
+            environment: [:]
+        )
+        XCTAssertFalse(parsed.isDemo)
+        XCTAssertTrue(parsed.dumpTokenSummary)
+
+        let demoDump = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--demo", "--dump-token-summary"],
+            environment: [:]
+        )
+        XCTAssertTrue(demoDump.isDemo)
+        XCTAssertTrue(demoDump.dumpTokenSummary)
     }
 }

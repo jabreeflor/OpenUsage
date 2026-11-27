@@ -413,4 +413,86 @@ final class StatisticsAggregatorTests: XCTestCase {
         XCTAssertEqual(TokenFormatter.formatTokens(today.usage(for: .chatgpt).totalTokens), "395K")
         XCTAssertEqual(TokenFormatter.formatTokens(today.usage(for: .cursor).totalTokens), "271K")
     }
+
+    func testStatisticsTodayMergeAndDumperHandleMaxIntAndCombinedOverflow() {
+        let calendar = StatisticsAggregator.gregorianCalendar(timeZone: TimeZone(secondsFromGMT: 0)!)
+        let anchor = makeDate(year: 2026, month: 11, day: 26, calendar: calendar)
+
+        // 1) Single Int.max input bucket (regression for chart y-axis rounding crash).
+        let singleMaxBucket = [
+            TokenBucket(
+                dayKey: "2026-11-26",
+                hour: 12,
+                provider: .claude,
+                model: "claude-opus-4.5",
+                inputTokens: Int.max,
+                outputTokens: 0,
+                cacheTokens: 0,
+                requests: 1
+            )
+        ]
+        let singleSummary = StatisticsAggregator.summarize(
+            buckets: singleMaxBucket,
+            range: .sevenDays,
+            filter: .overview,
+            anchorDate: anchor,
+            calendar: calendar
+        )
+        XCTAssertEqual(singleSummary.tokenSummary.totalTokens, Int.max)
+        XCTAssertEqual(singleSummary.yAxisTop, Int.max)
+        XCTAssertEqual(singleSummary.yAxisMid, Int.max / 2)
+        XCTAssertEqual(singleSummary.dailyBars.last?.totalTokens, Int.max)
+        XCTAssertEqual(singleSummary.topModels.first?.sharePercent, 100)
+
+        // 2) Multiple buckets whose combined daily total, provider total, model total, and Today model-share
+        // denominator all exceed Int.max.
+        let multiOverflowBuckets = [
+            TokenBucket(dayKey: "2026-11-26", hour: 10, provider: .claude, model: "model-a", inputTokens: Int.max, outputTokens: 0, cacheTokens: 0, requests: 1),
+            TokenBucket(dayKey: "2026-11-26", hour: 11, provider: .claude, model: "model-b", inputTokens: Int.max, outputTokens: 0, cacheTokens: 0, requests: 1),
+            TokenBucket(dayKey: "2026-11-26", hour: 12, provider: .chatgpt, model: "gpt-5-codex", inputTokens: Int.max, outputTokens: 0, cacheTokens: 0, requests: 1),
+            TokenBucket(dayKey: "2026-11-26", hour: 10, provider: .claude, model: "model-a", inputTokens: Int.max, outputTokens: 100, cacheTokens: 50, requests: Int.max)
+        ]
+
+        // Merge must saturate without dropping buckets or trapping.
+        let merged = TokenBucketAggregator.merge(multiOverflowBuckets)
+        XCTAssertEqual(merged.count, 3)
+        let mergedModelA = merged.first { $0.model == "model-a" }
+        XCTAssertEqual(mergedModelA?.inputTokens, Int.max)
+        XCTAssertEqual(mergedModelA?.outputTokens, 100)
+        XCTAssertEqual(mergedModelA?.cacheTokens, 50)
+        XCTAssertEqual(mergedModelA?.requests, Int.max)
+        XCTAssertEqual(mergedModelA?.totalTokens, Int.max)
+
+        // Statistics summary must complete for both overview and single-provider filters.
+        let overflowOverview = StatisticsAggregator.summarize(
+            buckets: multiOverflowBuckets,
+            range: .thirtyDays,
+            filter: .overview,
+            anchorDate: anchor,
+            calendar: calendar
+        )
+        XCTAssertEqual(overflowOverview.tokenSummary.totalTokens, Int.max)
+        XCTAssertEqual(overflowOverview.sidebarTotalAll, Int.max)
+        XCTAssertEqual(overflowOverview.dailyBars.last?.totalTokens, Int.max)
+        XCTAssertEqual(overflowOverview.yAxisTop, Int.max)
+        XCTAssertTrue(overflowOverview.topModels.allSatisfy { (0...100).contains($0.sharePercent) })
+
+        // Today usage must complete and compute valid model shares totaling 100% without overflowing.
+        let today = StatisticsAggregator.todayUsage(from: multiOverflowBuckets, on: anchor, calendar: calendar)
+        XCTAssertEqual(today.totalTokens, Int.max)
+        XCTAssertEqual(today.totalRequests, Int.max)
+        let claudeToday = today.usage(for: .claude)
+        XCTAssertEqual(claudeToday.totalTokens, Int.max)
+        XCTAssertEqual(claudeToday.models.count, 2)
+        XCTAssertEqual(claudeToday.models.map(\.sharePercent), [50, 50])
+
+        // TokenSummaryDumper must format without crashing.
+        let report = TokenSummaryDumper.formatReport(
+            buckets: multiOverflowBuckets,
+            anchorDate: anchor,
+            calendar: calendar
+        )
+        XCTAssertTrue(report.contains("claude: total=\(Int.max)"))
+        XCTAssertTrue(report.contains("all: total=\(Int.max)"))
+    }
 }

@@ -330,8 +330,10 @@ struct StatisticsContentView: View {
 
                 KPICardView(
                     title: "LIMITS HIT",
-                    value: TokenFormatter.formatCount(summary.limitsHit),
-                    valueColor: Theme.limitsHitRed.swiftUIColor
+                    value: summary.limitsHitDisplayText,
+                    valueColor: summary.limitsHitAvailable
+                        ? Theme.limitsHitRed.swiftUIColor
+                        : Theme.textMuted.swiftUIColor
                 )
             }
         }
@@ -590,7 +592,7 @@ private struct InOutCacheBarView: View {
             let gap: CGFloat = 2
             let totalGap = gap * CGFloat(max(0, parts.count - 1))
             let usableWidth = max(0, size.width - totalGap)
-            let totalWeight = CGFloat(parts.reduce(0) { $0 + $1.weight })
+            let totalWeight = parts.reduce(CGFloat(0)) { $0 + CGFloat($1.weight) }
 
             var x: CGFloat = 0
             for (index, part) in parts.enumerated() {
@@ -643,9 +645,9 @@ private struct TokensPerDayCardView: View {
             HStack(alignment: .top, spacing: 8) {
                 // Y-axis labels
                 VStack(alignment: .trailing, spacing: 0) {
-                    Text(TokenFormatter.formatTokens(summary.yAxisTop))
+                    Text(summary.yAxisTop > 0 ? TokenFormatter.formatTokens(summary.yAxisTop) : "")
                     Spacer(minLength: 0)
-                    Text(TokenFormatter.formatTokens(summary.yAxisMid))
+                    Text(summary.yAxisMid > 0 ? TokenFormatter.formatTokens(summary.yAxisMid) : "")
                     Spacer(minLength: 0)
                     Text("0")
                 }
@@ -656,17 +658,25 @@ private struct TokensPerDayCardView: View {
                 // Bars + X-axis labels
                 VStack(spacing: 6) {
                     VStack(spacing: 0) {
-                        HStack(alignment: .bottom, spacing: barSpacing) {
-                            ForEach(summary.dailyBars) { bar in
-                                StackedDayBarView(
-                                    bar: bar,
-                                    yAxisTop: summary.yAxisTop,
-                                    plotHeight: plotHeight
-                                )
-                                .help(bar.tooltipText)
+                        ZStack {
+                            HStack(alignment: .bottom, spacing: barSpacing) {
+                                ForEach(summary.dailyBars) { bar in
+                                    StackedDayBarView(
+                                        bar: bar,
+                                        yAxisTop: summary.yAxisTop,
+                                        plotHeight: plotHeight
+                                    )
+                                    .help(bar.tooltipText)
+                                }
+                            }
+                            .frame(height: plotHeight, alignment: .bottom)
+
+                            if summary.tokenSummary.totalTokens == 0 {
+                                Text("No token usage recorded in this range")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.textMuted.swiftUIColor)
                             }
                         }
-                        .frame(height: plotHeight, alignment: .bottom)
 
                         Rectangle()
                             .fill(Theme.border.swiftUIColor)

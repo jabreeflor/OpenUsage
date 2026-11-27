@@ -474,6 +474,10 @@ private struct ProviderDetailCardView: View {
         }
 
         // Divider + Models today
+        modelsTodaySection
+    }
+
+    private var modelsTodaySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Rectangle()
                 .fill(Theme.border.swiftUIColor)
@@ -557,6 +561,10 @@ private struct ProviderDetailCardView: View {
                     )
             }
             .buttonStyle(.plain)
+
+            if todayUsage.totalTokens > 0 {
+                modelsTodaySection
+            }
         }
     }
 

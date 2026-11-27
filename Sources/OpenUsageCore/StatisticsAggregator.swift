@@ -178,11 +178,16 @@ public struct StatisticsSummary: Sendable, Equatable {
     public let visibleProviders: [ProviderID]
     public let tokenSummary: TokenSummary
     public let limitsHit: Int
+    public let limitsHitAvailable: Bool
     public let dailyBars: [DailyTokenBar]
     public let yAxisTop: Int
     public let yAxisMid: Int
     public let topModels: [ModelUsageRow]
     public let heatmapRows: [HeatmapRow]
+
+    public var limitsHitDisplayText: String {
+        limitsHitAvailable ? TokenFormatter.formatCount(limitsHit) : "\u{2013}"
+    }
 
     public func sidebarTotal(for filter: StatisticsFilter) -> Int {
         switch filter {
@@ -237,6 +242,7 @@ public enum StatisticsAggregator {
     public static func summarize(
         buckets: [TokenBucket],
         limitHits: [LimitHitEvent] = [],
+        limitsHitAvailable: Bool = true,
         range: StatisticsRange,
         filter: StatisticsFilter,
         anchorDate: Date,
@@ -277,6 +283,7 @@ public enum StatisticsAggregator {
         var filteredOutput = 0
         var filteredCache = 0
         var filteredRequests = 0
+        var filteredTotalDouble = 0.0
         var dailyProviderTokens: [[ProviderID: Int]] = Array(repeating: [:], count: dayCount)
         var modelTotals: [ModelKey: Int] = [:]
         var heatmapTokens: [[Int]] = Array(repeating: Array(repeating: 0, count: 24), count: 7)
@@ -285,27 +292,45 @@ public enum StatisticsAggregator {
         for bucket in buckets {
             guard let dayIndex = dayIndexByKey[bucket.dayKey] else { continue }
             let bucketTotal = bucket.totalTokens
-            sidebarTotalsByProvider[bucket.provider, default: 0] += bucketTotal
+            sidebarTotalsByProvider[bucket.provider] = CheckedTokenMath.saturatingAdd(
+                sidebarTotalsByProvider[bucket.provider] ?? 0,
+                bucketTotal
+            )
 
             guard visibleSet.contains(bucket.provider) else { continue }
 
-            filteredInput += bucket.inputTokens
-            filteredOutput += bucket.outputTokens
-            filteredCache += bucket.cacheTokens
-            filteredRequests += bucket.requests
+            filteredInput = CheckedTokenMath.saturatingAdd(filteredInput, bucket.inputTokens)
+            filteredOutput = CheckedTokenMath.saturatingAdd(filteredOutput, bucket.outputTokens)
+            filteredCache = CheckedTokenMath.saturatingAdd(filteredCache, bucket.cacheTokens)
+            filteredRequests = CheckedTokenMath.saturatingAdd(filteredRequests, bucket.requests)
+            filteredTotalDouble += Double(bucketTotal)
 
-            dailyProviderTokens[dayIndex][bucket.provider, default: 0] += bucketTotal
+            dailyProviderTokens[dayIndex][bucket.provider] = CheckedTokenMath.saturatingAdd(
+                dailyProviderTokens[dayIndex][bucket.provider] ?? 0,
+                bucketTotal
+            )
 
             let modelKey = ModelKey(provider: bucket.provider, model: bucket.model)
-            modelTotals[modelKey, default: 0] += bucketTotal
+            modelTotals[modelKey] = CheckedTokenMath.saturatingAdd(
+                modelTotals[modelKey] ?? 0,
+                bucketTotal
+            )
 
             let weekday = days[dayIndex].weekday
             let mondayIndex = (weekday + 5) % 7
-            heatmapTokens[mondayIndex][bucket.hour] += bucketTotal
-            heatmapRequests[mondayIndex][bucket.hour] += bucket.requests
+            heatmapTokens[mondayIndex][bucket.hour] = CheckedTokenMath.saturatingAdd(
+                heatmapTokens[mondayIndex][bucket.hour],
+                bucketTotal
+            )
+            heatmapRequests[mondayIndex][bucket.hour] = CheckedTokenMath.saturatingAdd(
+                heatmapRequests[mondayIndex][bucket.hour],
+                bucket.requests
+            )
         }
 
-        let sidebarTotalAll = ProviderID.allCases.reduce(0) { $0 + (sidebarTotalsByProvider[$1] ?? 0) }
+        let sidebarTotalAll = ProviderID.allCases.reduce(0) {
+            CheckedTokenMath.saturatingAdd($0, sidebarTotalsByProvider[$1] ?? 0)
+        }
         let tokenSummary = TokenSummary(
             inputTokens: filteredInput,
             outputTokens: filteredOutput,
@@ -318,7 +343,7 @@ public enum StatisticsAggregator {
             guard dayIndexByKey[event.dayKey] != nil, visibleSet.contains(event.provider) else {
                 return count
             }
-            return count + 1
+            return CheckedTokenMath.saturatingAdd(count, 1)
         }
 
         // Daily stacked bars
@@ -330,7 +355,7 @@ public enum StatisticsAggregator {
             let segments = visibleProviders.map { provider in
                 DayBarSegment(provider: provider, tokens: dailyProviderTokens[index][provider] ?? 0)
             }
-            let dayTotal = segments.reduce(0) { $0 + $1.tokens }
+            let dayTotal = segments.reduce(0) { CheckedTokenMath.saturatingAdd($0, $1.tokens) }
             maxDailyTokens = max(maxDailyTokens, dayTotal)
 
             let month = calendar.component(.month, from: day.date)
@@ -379,11 +404,15 @@ public enum StatisticsAggregator {
             .prefix(5)
 
         let topModelTokens = sortedModels.first?.value ?? 0
-        let totalFilteredTokens = tokenSummary.totalTokens
+        let totalFilteredTokensDouble = max(Double(tokenSummary.totalTokens), filteredTotalDouble)
         let topModels: [ModelUsageRow] = sortedModels.map { entry in
-            let share = totalFilteredTokens > 0
-                ? Int((Double(entry.value) / Double(totalFilteredTokens) * 100.0).rounded())
-                : 0
+            let share: Int
+            if totalFilteredTokensDouble > 0 {
+                let raw = (Double(entry.value) / totalFilteredTokensDouble * 100.0).rounded()
+                share = raw.isFinite ? Int(min(100.0, max(0.0, raw))) : 0
+            } else {
+                share = 0
+            }
             let relative = topModelTokens > 0
                 ? Double(entry.value) / Double(topModelTokens)
                 : 0.0
@@ -464,6 +493,7 @@ public enum StatisticsAggregator {
             visibleProviders: visibleProviders,
             tokenSummary: tokenSummary,
             limitsHit: limitsHit,
+            limitsHitAvailable: limitsHitAvailable,
             dailyBars: dailyBars,
             yAxisTop: yAxisTop,
             yAxisMid: yAxisMid,
@@ -488,12 +518,15 @@ public enum StatisticsAggregator {
 
         for bucket in buckets where bucket.dayKey == targetKey {
             let tokens = bucket.totalTokens
-            totalTokens += tokens
-            totalRequests += bucket.requests
-            twoHourBins[min(11, max(0, bucket.hour / 2))] += tokens
-            providerTokens[bucket.provider, default: 0] += tokens
-            providerRequests[bucket.provider, default: 0] += bucket.requests
-            providerModels[bucket.provider, default: [:]][bucket.model, default: 0] += tokens
+            totalTokens = CheckedTokenMath.saturatingAdd(totalTokens, tokens)
+            totalRequests = CheckedTokenMath.saturatingAdd(totalRequests, bucket.requests)
+            let binIdx = min(11, max(0, bucket.hour / 2))
+            twoHourBins[binIdx] = CheckedTokenMath.saturatingAdd(twoHourBins[binIdx], tokens)
+            providerTokens[bucket.provider] = CheckedTokenMath.saturatingAdd(providerTokens[bucket.provider] ?? 0, tokens)
+            providerRequests[bucket.provider] = CheckedTokenMath.saturatingAdd(providerRequests[bucket.provider] ?? 0, bucket.requests)
+            var models = providerModels[bucket.provider] ?? [:]
+            models[bucket.model] = CheckedTokenMath.saturatingAdd(models[bucket.model] ?? 0, tokens)
+            providerModels[bucket.provider] = models
         }
 
         var byProvider: [ProviderID: ProviderTodayUsage] = [:]
@@ -548,22 +581,31 @@ public enum StatisticsAggregator {
         } else {
             step = 1_000
         }
-        return ((maxValue + step - 1) / step) * step
+        let remainder = maxValue % step
+        if remainder == 0 {
+            return maxValue
+        }
+        let increment = step - remainder
+        let (rounded, overflow) = maxValue.addingReportingOverflow(increment)
+        return overflow ? Int.max : rounded
     }
 
     private static func largestRemainderPercents(for values: [Int]) -> [Int] {
-        let sum = values.reduce(0, +)
+        let sum = values.reduce(0.0) { $0 + Double(max(0, $1)) }
         guard sum > 0 else { return Array(repeating: 0, count: values.count) }
         var floors: [Int] = []
+        floors.reserveCapacity(values.count)
         var remainders: [(index: Int, remainder: Double)] = []
+        remainders.reserveCapacity(values.count)
         var floorSum = 0
 
         for (index, value) in values.enumerated() {
-            let exact = Double(value) / Double(sum) * 100.0
-            let floored = Int(floor(exact))
+            let exact = (Double(max(0, value)) / sum) * 100.0
+            let flooredDouble = floor(exact)
+            let floored = flooredDouble.isFinite ? min(100, max(0, Int(flooredDouble))) : 0
             floors.append(floored)
-            floorSum += floored
-            remainders.append((index: index, remainder: exact - Double(floored)))
+            floorSum = CheckedTokenMath.saturatingAdd(floorSum, floored)
+            remainders.append((index: index, remainder: max(0.0, exact - Double(floored))))
         }
 
         let deficit = max(0, 100 - floorSum)

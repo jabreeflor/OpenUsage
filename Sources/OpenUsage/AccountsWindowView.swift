@@ -41,7 +41,7 @@ struct AccountsWindowView: View {
                 _ = store.accounts.signOut(provider)
             },
             onToggleSource: { source in
-                store.localSources.toggle(source)
+                store.toggleLocalSource(source)
             },
             onApplyYellowInput: { raw in
                 store.thresholds.applyYellowInput(raw)
