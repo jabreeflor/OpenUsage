@@ -17,6 +17,7 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
     public let toolSource: LocalToolSource = .codexCLI
     public let sourceLabel: String = "~/.codex/sessions"
     public let rootDirectory: URL
+    public let fileAccess: any TokenLogFileAccess
     internal let maxScanAttempts: Int
     internal let onLineScannedForTesting: (@Sendable (_ relativePath: String, _ attempt: Int, _ lineNumber: Int) -> Void)?
 
@@ -24,18 +25,24 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
     private static let turnContextNeedle = Array("\"turn_context\"".utf8)
     private static let sessionMetaNeedle = Array("\"session_meta\"".utf8)
 
-    public init(rootDirectory: URL = CodexCLITokenLogSource.defaultRootDirectory()) {
+    public init(
+        rootDirectory: URL = CodexCLITokenLogSource.defaultRootDirectory(),
+        fileAccess: any TokenLogFileAccess = SystemTokenLogFileAccess()
+    ) {
         self.rootDirectory = rootDirectory
+        self.fileAccess = fileAccess
         self.maxScanAttempts = 3
         self.onLineScannedForTesting = nil
     }
 
     internal init(
         rootDirectory: URL = CodexCLITokenLogSource.defaultRootDirectory(),
+        fileAccess: any TokenLogFileAccess = SystemTokenLogFileAccess(),
         maxScanAttempts: Int = 3,
         onLineScannedForTesting: (@Sendable (_ relativePath: String, _ attempt: Int, _ lineNumber: Int) -> Void)? = nil
     ) {
         self.rootDirectory = rootDirectory
+        self.fileAccess = fileAccess
         self.maxScanAttempts = max(1, maxScanAttempts)
         self.onLineScannedForTesting = onLineScannedForTesting
     }
@@ -50,98 +57,269 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
     }
 
     public func refresh(state: inout SourceCacheState, calendar: Calendar) throws -> [TokenBucket] {
-        let discovered = SafeDirectoryScanner.discoverFiles(under: rootDirectory) { url in
+        try refreshLocalPass(state: &state, calendar: calendar, now: Date()).buckets
+    }
+
+    public func refreshLocalPass(
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date
+    ) throws -> LocalRefreshResult {
+        try refreshLocalPass(state: &state, calendar: calendar, now: now) { _, _, _ in false }
+    }
+
+    public func refreshLocalPass(
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date,
+        shouldSkipInFlightVersion: (_ cacheKey: String, _ metadata: FileMetadata, _ secondaryMetadata: FileMetadata?) -> Bool
+    ) throws -> LocalRefreshResult {
+        let discovered = fileAccess.discoverFiles(under: rootDirectory) { url in
             let name = url.lastPathComponent
             return name.hasPrefix("rollout-") && url.pathExtension.lowercased() == "jsonl"
         }
 
         let livePaths = Set(discovered.map(\.relativePath))
         for stalePath in state.files.keys where !livePaths.contains(stalePath) {
-            state.files.removeValue(forKey: stalePath)
+            let staleURL = rootDirectory.appendingPathComponent(stalePath, isDirectory: false)
+            do {
+                if let meta = try fileAccess.readMetadataOrThrow(at: staleURL), meta.isRegularFile {
+                    continue
+                }
+                state.files.removeValue(forKey: stalePath)
+            } catch {
+                continue
+            }
         }
 
+        var pendingEvicted: [PendingEvictedLogFile] = []
+        var inconclusiveCacheKeys: Set<String> = []
+        var resolvedCacheKeys: Set<String> = []
         for file in discovered {
-            scanFile(
+            let result = scanFile(
                 at: file.url,
                 relativePath: file.relativePath,
+                allowMaterialization: false,
+                expectedVersion: nil,
+                materializationNow: nil,
+                shouldSkipInFlightVersion: shouldSkipInFlightVersion,
                 state: &state,
                 calendar: calendar
             )
+            switch result {
+            case .skippedDataless(let meta):
+                if EvictedLogPolicy.isRecentEnoughToMaterialize(mtimeNanos: meta.mtimeNanos, now: now) {
+                    pendingEvicted.append(
+                        PendingEvictedLogFile(
+                            toolSource: toolSource,
+                            url: file.url,
+                            relativePath: file.relativePath,
+                            cacheKey: file.relativePath,
+                            metadata: meta
+                        )
+                    )
+                } else {
+                    resolvedCacheKeys.insert(file.relativePath)
+                }
+            case .counted, .removed, .skippedTooOld, .staleVersion:
+                resolvedCacheKeys.insert(file.relativePath)
+            case .stillDataless, .failed:
+                inconclusiveCacheKeys.insert(file.relativePath)
+            }
         }
 
-        return state.mergedBuckets()
+        return LocalRefreshResult(
+            buckets: state.mergedBuckets(),
+            pendingEvictedFiles: pendingEvicted,
+            inconclusiveCacheKeys: inconclusiveCacheKeys,
+            resolvedCacheKeys: resolvedCacheKeys
+        )
+    }
+
+    public func isPendingFileConfirmedRemoved(_ file: PendingEvictedLogFile) -> Bool {
+        do {
+            guard let meta = try fileAccess.readMetadataOrThrow(at: file.url) else {
+                return true
+            }
+            return !meta.isRegularFile
+        } catch {
+            return false
+        }
+    }
+
+    public func scanEvictedFile(
+        _ file: PendingEvictedLogFile,
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date
+    ) -> EvictedMaterializationOutcome {
+        switch scanFile(
+            at: file.url,
+            relativePath: file.relativePath,
+            allowMaterialization: true,
+            expectedVersion: file.metadata,
+            materializationNow: now,
+            state: &state,
+            calendar: calendar
+        ) {
+        case .counted:
+            return .counted
+        case .removed:
+            return .removed
+        case .skippedTooOld:
+            return .skippedTooOld
+        case .staleVersion:
+            return .staleVersion
+        case .skippedDataless, .stillDataless:
+            return .stillDataless
+        case .failed:
+            return .failed
+        }
+    }
+
+    private enum FileScanResult {
+        case counted
+        case removed
+        case skippedTooOld
+        case staleVersion
+        case skippedDataless(FileMetadata)
+        case stillDataless
+        case failed
     }
 
     private enum ScanAttemptOutcome {
         case done
+        case removed
+        case skippedTooOld
+        case staleVersion
         case retry
+        case skippedDataless(FileMetadata)
+        case stillDataless
         case preserveExisting
     }
 
+    @discardableResult
     private func scanFile(
         at url: URL,
         relativePath: String,
+        allowMaterialization: Bool,
+        expectedVersion: FileMetadata?,
+        materializationNow: Date?,
+        shouldSkipInFlightVersion: (_ cacheKey: String, _ metadata: FileMetadata, _ secondaryMetadata: FileMetadata?) -> Bool = { _, _, _ in false },
         state: inout SourceCacheState,
         calendar: Calendar
-    ) {
+    ) -> FileScanResult {
         for attempt in 1...maxScanAttempts {
             let outcome = runScanAttempt(
                 at: url,
                 relativePath: relativePath,
                 attempt: attempt,
+                allowMaterialization: allowMaterialization,
+                expectedVersion: expectedVersion,
+                materializationNow: materializationNow,
+                shouldSkipInFlightVersion: shouldSkipInFlightVersion,
                 state: &state,
                 calendar: calendar
             )
             switch outcome {
-            case .done, .preserveExisting:
-                return
+            case .done:
+                return .counted
+            case .removed:
+                return .removed
+            case .skippedTooOld:
+                return .skippedTooOld
+            case .staleVersion:
+                return .staleVersion
+            case .skippedDataless(let meta):
+                return .skippedDataless(meta)
+            case .stillDataless:
+                return .stillDataless
+            case .preserveExisting:
+                return .failed
             case .retry:
                 continue
             }
         }
-        // Exhausted retries due to concurrent rotation/mutation: drop cached state so the next refresh rescans from 0.
-        state.files.removeValue(forKey: relativePath)
+        // Exhausted retries due to concurrent rotation/mutation: in local pass drop cached state so the next refresh rescans from 0.
+        if !allowMaterialization {
+            state.files.removeValue(forKey: relativePath)
+        }
+        return .failed
     }
 
     private func runScanAttempt(
         at url: URL,
         relativePath: String,
         attempt: Int,
+        allowMaterialization: Bool,
+        expectedVersion: FileMetadata?,
+        materializationNow: Date?,
+        shouldSkipInFlightVersion: (_ cacheKey: String, _ metadata: FileMetadata, _ secondaryMetadata: FileMetadata?) -> Bool,
         state: inout SourceCacheState,
         calendar: Calendar
     ) -> ScanAttemptOutcome {
-        guard let preMeta = FileMetadata.read(at: url) else {
-            state.files.removeValue(forKey: relativePath)
-            return .done
+        let preMeta: FileMetadata
+        do {
+            guard let meta = try fileAccess.readMetadataOrThrow(at: url) else {
+                state.files.removeValue(forKey: relativePath)
+                return .removed
+            }
+            preMeta = meta
+        } catch {
+            return .preserveExisting
         }
         guard preMeta.isRegularFile else {
             state.files.removeValue(forKey: relativePath)
-            return .done
+            return .removed
         }
-        // Never materialize iCloud-evicted files; retain any previously cached counts for them.
-        guard !preMeta.isDataless else {
+        if !allowMaterialization, shouldSkipInFlightVersion(relativePath, preMeta, nil) {
             return .preserveExisting
         }
-
-        let fd = StreamingLineReader.openReadOnly(at: url)
-        guard fd >= 0 else {
-            if errno == ENOENT || errno == ELOOP {
-                state.files.removeValue(forKey: relativePath)
+        if preMeta.isDataless {
+            if let expectedVersion {
+                if let materializationNow,
+                   !EvictedLogPolicy.isRecentEnoughToMaterialize(mtimeNanos: preMeta.mtimeNanos, now: materializationNow) {
+                    return .skippedTooOld
+                }
+                guard EvictedLogPolicy.sameFileVersion(preMeta, expectedVersion) else {
+                    return .staleVersion
+                }
+            }
+            if let existing = state.files[relativePath],
+               EvictedLogPolicy.isCacheEntryUpToDate(existing, for: preMeta) {
                 return .done
+            }
+            if !allowMaterialization {
+                return .skippedDataless(preMeta)
+            }
+        } else if let expectedVersion {
+            guard EvictedLogPolicy.sameFileVersion(preMeta, expectedVersion) else {
+                return .staleVersion
+            }
+        }
+
+        let fd = fileAccess.openReadOnly(at: url, allowMaterialization: allowMaterialization)
+        guard fd >= 0 else {
+            if errno == ENOENT || errno == ENOTDIR || errno == ELOOP {
+                state.files.removeValue(forKey: relativePath)
+                return .removed
             }
             return .preserveExisting
         }
-        defer { _ = Darwin.close(fd) }
+        defer { fileAccess.close(fd: fd) }
 
-        guard let openMeta = FileMetadata.read(fd: fd) else {
+        guard let openMeta = fileAccess.readMetadata(fd: fd) else {
             return .retry
         }
         guard openMeta.isRegularFile else {
             state.files.removeValue(forKey: relativePath)
-            return .done
+            return .removed
         }
-        guard !openMeta.isDataless else {
-            return .preserveExisting
+        if openMeta.isDataless {
+            return allowMaterialization ? .stillDataless : .skippedDataless(openMeta)
+        }
+        if let expectedVersion, !EvictedLogPolicy.sameFileVersion(openMeta, expectedVersion) {
+            return .staleVersion
         }
 
         let existing = state.files[relativePath]
@@ -156,11 +334,22 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
            existing.inode == openMeta.inode,
            openMeta.mtimeNanos >= existing.mtimeNanos,
            openMeta.size >= existing.offset {
+            if existing.fileSize == openMeta.size,
+               existing.mtimeNanos == openMeta.mtimeNanos,
+               let expectedEOFFingerprint = existing.eofFingerprint
+                   ?? (existing.offset == openMeta.size ? existing.prefixFingerprint : nil),
+               let fullHasher = StreamingLineReader.prefixHasher(fd: fd, upToOffset: openMeta.size),
+               StreamingLineReader.hexDigest(of: fullHasher) == expectedEOFFingerprint {
+                return StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta, fileAccess: fileAccess)
+                    ? .done
+                    : .retry
+            }
+
             if existing.offset == 0 {
                 if openMeta.size == 0
                     && existing.fileSize == 0
                     && existing.mtimeNanos == openMeta.mtimeNanos {
-                    return StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta)
+                    return StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta, fileAccess: fileAccess)
                         ? .done
                         : .retry
                 }
@@ -172,13 +361,6 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
             } else if let savedFingerprint = existing.prefixFingerprint,
                       let prefixHasher = StreamingLineReader.prefixHasher(fd: fd, upToOffset: existing.offset),
                       StreamingLineReader.hexDigest(of: prefixHasher) == savedFingerprint {
-                if existing.fileSize == openMeta.size
-                    && existing.mtimeNanos == openMeta.mtimeNanos
-                    && existing.offset == openMeta.size {
-                    return StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta)
-                        ? .done
-                        : .retry
-                }
                 startOffset = existing.offset
                 initialHasher = prefixHasher
                 accumulator = TokenBucketAccumulator(initialBuckets: existing.buckets)
@@ -237,14 +419,14 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
                 return .advance
             }
         } catch {
-            if !StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta) {
+            if !StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta, fileAccess: fileAccess) {
                 return .retry
             }
             return .preserveExisting
         }
 
         guard readResult.eofOffset == openMeta.size,
-              StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta) else {
+              StreamingLineReader.verifyUnchanged(at: url, fd: fd, since: openMeta, fileAccess: fileAccess) else {
             return .retry
         }
 
@@ -256,6 +438,7 @@ public struct CodexCLITokenLogSource: IncrementalTokenLogSource, Sendable {
             offset: readResult.consumedOffset,
             buckets: accumulator.buckets(),
             prefixFingerprint: readResult.consumedFingerprint,
+            eofFingerprint: readResult.eofFingerprint,
             currentModel: currentModel,
             previousCodexTotals: previousTotals
         )

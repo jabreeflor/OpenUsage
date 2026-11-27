@@ -501,23 +501,71 @@ final class StatisticsAggregatorTests: XCTestCase {
         let anchor = makeDate(year: 2026, month: 11, day: 26, calendar: calendar)
 
         // Demo mode has fixture historical coverage for both 7D and 30D.
-        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: true, historicalCoverageDays: 0, range: .sevenDays))
-        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: true, historicalCoverageDays: 0, range: .thirtyDays))
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: true,
+            filter: .overview,
+            connectedProviders: [],
+            range: .sevenDays,
+            coverageRatioForProvider: { _ in 0.0 }
+        ))
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: true,
+            filter: .provider(.chatgpt),
+            connectedProviders: [],
+            range: .thirtyDays,
+            coverageRatioForProvider: { _ in 0.0 }
+        ))
 
-        // Live mode without full historical coverage for the selected range must stay unavailable (never invent 0).
-        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 0, range: .sevenDays))
-        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 0, range: .thirtyDays))
-        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 6, range: .sevenDays))
-        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 7, range: .sevenDays))
-        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 7, range: .thirtyDays))
-        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 30, range: .thirtyDays))
+        // Live mode requires >= 90% observed coverage for every provider in scope (and non-empty scope).
+        let partialCoverage: [ProviderID: Double] = [.claude: 0.95, .chatgpt: 0.89]
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: false,
+            filter: .provider(.claude),
+            connectedProviders: [.claude, .chatgpt],
+            range: .sevenDays,
+            coverageRatioForProvider: { partialCoverage[$0] ?? 0.0 }
+        ))
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: false,
+            filter: .provider(.chatgpt),
+            connectedProviders: [.claude, .chatgpt],
+            range: .sevenDays,
+            coverageRatioForProvider: { partialCoverage[$0] ?? 0.0 }
+        ))
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: false,
+            filter: .overview,
+            connectedProviders: [.claude, .chatgpt],
+            range: .sevenDays,
+            coverageRatioForProvider: { partialCoverage[$0] ?? 0.0 }
+        ))
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: false,
+            filter: .overview,
+            connectedProviders: [.claude],
+            range: .sevenDays,
+            coverageRatioForProvider: { partialCoverage[$0] ?? 0.0 }
+        ))
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(
+            isDemo: false,
+            filter: .overview,
+            connectedProviders: [],
+            range: .sevenDays,
+            coverageRatioForProvider: { _ in 1.0 }
+        ))
 
         let liveSummary = StatisticsAggregator.summarize(
             buckets: [
                 TokenBucket(dayKey: "2026-11-26", hour: 12, provider: .claude, model: "claude-opus-4.5", inputTokens: 1_000, outputTokens: 200, cacheTokens: 0, requests: 2)
             ],
             limitHits: [],
-            limitsHitAvailable: StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 0, range: .sevenDays),
+            limitsHitAvailable: StatisticsLimitHitPolicy.isAvailable(
+                isDemo: false,
+                filter: .overview,
+                connectedProviders: [.claude],
+                range: .sevenDays,
+                coverageRatioForProvider: { _ in 0.0 }
+            ),
             range: .sevenDays,
             filter: .overview,
             anchorDate: anchor,

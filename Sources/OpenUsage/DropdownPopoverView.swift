@@ -79,7 +79,7 @@ struct DropdownContentView: View {
                     .foregroundStyle(Theme.textPrimary.swiftUIColor)
                 Spacer()
                 Text(updatedAgoText)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .regular))
                     .foregroundStyle(Theme.textMuted.swiftUIColor)
             }
 
@@ -100,6 +100,7 @@ struct DropdownContentView: View {
                     )
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             // Detail card for selected tile
             detailCard
@@ -119,6 +120,7 @@ struct DropdownContentView: View {
         // 1 pt strokeBorder + 14 pt inner padding matches FinalDropdown.dc.html (border: 1px; padding: 14px)
         .padding(15)
         .frame(width: 380)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Theme.background.swiftUIColor)
@@ -226,20 +228,20 @@ private struct ProviderTileView: View {
                     .lineLimit(1)
 
                 Text(snapshot.provider.displayName)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .regular))
                     .foregroundStyle(Theme.textSecondary.swiftUIColor)
                     .lineLimit(1)
 
                 Text(subtitleText)
-                    .font(.system(size: 10))
+                    .font(.system(size: 10, weight: .regular))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .truncationMode(.tail)
             }
             .padding(.top, 12)
             .padding(.bottom, 10)
             .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 152, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(isSelected ? Theme.selectedBackground.swiftUIColor : Theme.cardBackground.swiftUIColor)
@@ -346,7 +348,7 @@ private struct TodayTileView: View {
                 Spacer(minLength: 0)
 
                 Text("tokens\u{00A0}·\u{00A0}\(TokenFormatter.formatCount(today.totalRequests)) requests")
-                    .font(.system(size: 10))
+                    .font(.system(size: 10, weight: .regular))
                     .foregroundStyle(Theme.textMuted.swiftUIColor)
                     .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
@@ -354,7 +356,7 @@ private struct TodayTileView: View {
             .padding(.top, 12)
             .padding(.bottom, 10)
             .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 152, maxHeight: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(isSelected ? Theme.selectedBackground.swiftUIColor : Theme.cardBackground.swiftUIColor)
@@ -424,7 +426,7 @@ private struct ProviderDetailCardView: View {
 
                 if !snapshot.plan.isEmpty {
                     Text(snapshot.plan)
-                        .font(.system(size: 11))
+                        .font(.system(size: 11, weight: .regular))
                         .foregroundStyle(Theme.textMuted.swiftUIColor)
                 }
 
@@ -458,7 +460,7 @@ private struct ProviderDetailCardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(limit.name)
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(Theme.textSecondary.swiftUIColor)
                     Spacer()
                     Text("\(limit.percentUsed)%")
@@ -469,7 +471,7 @@ private struct ProviderDetailCardView: View {
                 ProgressBarView(percent: limit.percentUsed, color: color)
 
                 Text(limit.resetText)
-                    .font(.system(size: 10))
+                    .font(.system(size: 10, weight: .regular))
                     .foregroundStyle(Theme.textMuted.swiftUIColor)
                     .frame(height: 12, alignment: .leading)
             }
@@ -487,7 +489,7 @@ private struct ProviderDetailCardView: View {
                 .padding(.bottom, 4)
 
             Text("MODELS TODAY · \(TokenFormatter.formatTokens(todayUsage.totalTokens)) TOKENS")
-                .font(.system(size: 10))
+                .font(.system(size: 10, weight: .regular))
                 .tracking(0.6)
                 .foregroundStyle(Theme.textMuted.swiftUIColor)
                 .frame(height: 12, alignment: .leading)
@@ -516,14 +518,14 @@ private struct ProviderDetailCardView: View {
                                 + Text(" \(model.sharePercent)%")
                                     .foregroundStyle(Theme.textMuted.swiftUIColor)
                             )
-                            .font(.system(size: 11))
+                            .font(.system(size: 11, weight: .regular))
                         }
                         .frame(height: 13)
                     }
                 }
             } else {
                 Text("No token usage recorded today")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .regular))
                     .foregroundStyle(Theme.textMuted.swiftUIColor)
             }
         }
@@ -757,7 +759,7 @@ private struct FooterLinkButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .regular))
                 .foregroundStyle(isHovering ? Theme.linkHoverColor.swiftUIColor : Theme.linkColor.swiftUIColor)
                 .padding(.vertical, 2)
                 .contentShape(Rectangle())

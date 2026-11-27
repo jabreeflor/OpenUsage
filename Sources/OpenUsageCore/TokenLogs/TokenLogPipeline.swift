@@ -549,6 +549,10 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
 
     // Optional source-specific incremental cursors
     public var prefixFingerprint: String?
+    /// Full-file SHA-256 over `0..<fileSize` recorded once the file has been inspected to EOF,
+    /// allowing unchanged files with an incomplete trailing JSONL line (`offset < fileSize`)
+    /// to avoid repeat downloads/parses while keeping `offset` before the incomplete record.
+    public var eofFingerprint: String?
     public var secondarySize: UInt64?
     public var secondaryMtimeNanos: Int64?
     public var secondaryInode: UInt64?
@@ -566,6 +570,7 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
         offset: UInt64 = 0,
         buckets: [TokenBucket] = [],
         prefixFingerprint: String? = nil,
+        eofFingerprint: String? = nil,
         secondarySize: UInt64? = nil,
         secondaryMtimeNanos: Int64? = nil,
         secondaryInode: UInt64? = nil,
@@ -582,6 +587,7 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
         self.offset = offset
         self.buckets = buckets
         self.prefixFingerprint = prefixFingerprint
+        self.eofFingerprint = eofFingerprint
         self.secondarySize = secondarySize
         self.secondaryMtimeNanos = secondaryMtimeNanos
         self.secondaryInode = secondaryInode
@@ -637,19 +643,115 @@ public struct TokenLogCacheDocument: Codable, Sendable, Equatable {
     }
 }
 
-/// Extension of `TokenLogSource` supporting incremental file-offset caching and folder watching.
+/// Result of the fast local-only refresh pass for one `IncrementalTokenLogSource`.
+public struct LocalRefreshResult: Sendable, Equatable {
+    public let buckets: [TokenBucket]
+    public let pendingEvictedFiles: [PendingEvictedLogFile]
+    /// Cache keys whose status could not be determined during this pass (e.g. transient `EIO`/`EACCES`),
+    /// so any existing pending entry and retry backoff should be preserved.
+    public let inconclusiveCacheKeys: Set<String>
+    /// Cache keys definitively resolved during this pass (counted, confirmed removed, or aged past 31-day cutoff).
+    public let resolvedCacheKeys: Set<String>
+
+    public init(
+        buckets: [TokenBucket],
+        pendingEvictedFiles: [PendingEvictedLogFile] = [],
+        inconclusiveCacheKeys: Set<String> = [],
+        resolvedCacheKeys: Set<String> = []
+    ) {
+        self.buckets = buckets
+        self.pendingEvictedFiles = pendingEvictedFiles
+        self.inconclusiveCacheKeys = inconclusiveCacheKeys
+        self.resolvedCacheKeys = resolvedCacheKeys
+    }
+}
+
+/// Extension of `TokenLogSource` supporting incremental file-offset caching, folder watching,
+/// and two-pass handling of iCloud-evicted (dataless) files.
 public protocol IncrementalTokenLogSource: TokenLogSource {
     var toolSource: LocalToolSource { get }
     var sourceLabel: String { get }
     var watchDirectories: [URL] { get }
 
     func refresh(state: inout SourceCacheState, calendar: Calendar) throws -> [TokenBucket]
+
+    /// Fast local-only pass: counts already-local files immediately without materializing evicted files,
+    /// returning local buckets plus any recent evicted files queued for the low-priority background pass.
+    func refreshLocalPass(
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date
+    ) throws -> LocalRefreshResult
+
+    /// Fast local-only pass that can skip files whose exact on-disk version is currently being scanned
+    /// by an in-flight background materialization worker so a finishing late worker is not parsed twice.
+    func refreshLocalPass(
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date,
+        shouldSkipInFlightVersion: (_ cacheKey: String, _ metadata: FileMetadata, _ secondaryMetadata: FileMetadata?) -> Bool
+    ) throws -> LocalRefreshResult
+
+    /// Materializes and scans a single pending evicted file through the same single-descriptor
+    /// transactional scan and per-file cache used by the local pass, validating current file version
+    /// and age against `now` before requesting any download.
+    func scanEvictedFile(
+        _ file: PendingEvictedLogFile,
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date
+    ) -> EvictedMaterializationOutcome
+
+    /// Returns `true` only when a previously pending file that was not enumerated during a local refresh
+    /// is confirmed absent (`ENOENT`/`ENOTDIR`) or no longer a regular file. Returns `false` on transient
+    /// metadata errors (e.g. `EIO`, `EACCES`) or if the file still exists so pending state and retry backoff
+    /// are retained across inconclusive refreshes.
+    func isPendingFileConfirmedRemoved(_ file: PendingEvictedLogFile) -> Bool
 }
 
 public extension IncrementalTokenLogSource {
     func loadBuckets() async throws -> [TokenBucket] {
         var state = SourceCacheState()
         return try refresh(state: &state, calendar: StatisticsAggregator.gregorianCalendar())
+    }
+
+    func refreshLocalPass(
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date
+    ) throws -> LocalRefreshResult {
+        let buckets = try refresh(state: &state, calendar: calendar)
+        return LocalRefreshResult(buckets: buckets, pendingEvictedFiles: [])
+    }
+
+    func refreshLocalPass(
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date,
+        shouldSkipInFlightVersion: (_ cacheKey: String, _ metadata: FileMetadata, _ secondaryMetadata: FileMetadata?) -> Bool
+    ) throws -> LocalRefreshResult {
+        try refreshLocalPass(state: &state, calendar: calendar, now: now)
+    }
+
+    func scanEvictedFile(
+        _ file: PendingEvictedLogFile,
+        state: inout SourceCacheState,
+        calendar: Calendar,
+        now: Date
+    ) -> EvictedMaterializationOutcome {
+        .counted
+    }
+
+    func scanEvictedFile(
+        _ file: PendingEvictedLogFile,
+        state: inout SourceCacheState,
+        calendar: Calendar
+    ) -> EvictedMaterializationOutcome {
+        scanEvictedFile(file, state: &state, calendar: calendar, now: Date())
+    }
+
+    func isPendingFileConfirmedRemoved(_ file: PendingEvictedLogFile) -> Bool {
+        true
     }
 }
 

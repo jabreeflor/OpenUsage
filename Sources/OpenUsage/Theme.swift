@@ -58,10 +58,25 @@ enum Theme {
 
     private static let fontRegistrationLock = NSLock()
     private nonisolated(unsafe) static var didRegisterFonts = false
+    private nonisolated(unsafe) static var didConfigureTextRendering = false
+
+    /// Matches the CSS `-webkit-font-smoothing: antialiased` text weight from the reference stills
+    /// so macOS CoreGraphics font smoothing does not dilate SF Pro text by ~1 weight step on dark surfaces.
+    static func configureTextRendering() {
+        fontRegistrationLock.lock()
+        defer { fontRegistrationLock.unlock() }
+        guard !didConfigureTextRendering else { return }
+        UserDefaults.standard.register(defaults: [
+            "CGFontRenderingFontSmoothingDisabled": true,
+            "AppleFontSmoothing": 0
+        ])
+        didConfigureTextRendering = true
+    }
 
     /// Registers bundled JetBrains Mono `.ttf` files with CoreText in `.process` scope.
     /// Safe to call headless (before `NSApplication` startup) and idempotent across repeated calls.
     static func registerBundledFonts() {
+        configureTextRendering()
         fontRegistrationLock.lock()
         defer { fontRegistrationLock.unlock() }
         guard !didRegisterFonts else { return }

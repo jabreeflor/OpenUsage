@@ -12,6 +12,7 @@ struct StatisticsWindowView: View {
             summary: store.statisticsSummary(),
             yellowFrom: store.thresholds.yellowFrom,
             redFrom: store.thresholds.redFrom,
+            pendingICloudFiles: store.options.isDemo ? 0 : store.pendingICloudFiles,
             showsSimulatedTrafficLights: false,
             onSelectRange: { store.statisticsRange = $0 },
             onSelectFilter: { store.statisticsFilter = $0 }
@@ -25,9 +26,37 @@ struct StatisticsContentView: View {
     let summary: StatisticsSummary
     let yellowFrom: Int
     let redFrom: Int
+    let pendingICloudFiles: Int
     let showsSimulatedTrafficLights: Bool
     let onSelectRange: (StatisticsRange) -> Void
     let onSelectFilter: (StatisticsFilter) -> Void
+
+    init(
+        snapshots: [ProviderSnapshot],
+        summary: StatisticsSummary,
+        yellowFrom: Int,
+        redFrom: Int,
+        pendingICloudFiles: Int = 0,
+        showsSimulatedTrafficLights: Bool,
+        onSelectRange: @escaping (StatisticsRange) -> Void,
+        onSelectFilter: @escaping (StatisticsFilter) -> Void
+    ) {
+        self.snapshots = snapshots
+        self.summary = summary
+        self.yellowFrom = yellowFrom
+        self.redFrom = redFrom
+        self.pendingICloudFiles = max(0, pendingICloudFiles)
+        self.showsSimulatedTrafficLights = showsSimulatedTrafficLights
+        self.onSelectRange = onSelectRange
+        self.onSelectFilter = onSelectFilter
+    }
+
+    private var pendingICloudNoteText: String {
+        if pendingICloudFiles == 1 {
+            return "Counting 1 more log file from iCloud"
+        }
+        return "Counting \(pendingICloudFiles) more log files from iCloud"
+    }
 
     private func snapshot(for provider: ProviderID) -> ProviderSnapshot {
         snapshots.first(where: { $0.provider == provider }) ?? ProviderSnapshot(
@@ -169,15 +198,28 @@ struct StatisticsContentView: View {
 
     private var mainContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Heading + date range
-            HStack(alignment: .firstTextBaseline) {
-                Text(summary.heading)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary.swiftUIColor)
-                Spacer(minLength: 8)
-                Text(summary.dateRangeText)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textMuted.swiftUIColor)
+            // Heading + date range (+ optional quiet iCloud note in live mode only)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(summary.heading)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(Theme.textPrimary.swiftUIColor)
+                    Spacer(minLength: 8)
+                    Text(summary.dateRangeText)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Theme.textMuted.swiftUIColor)
+                }
+                .frame(height: 23)
+
+                if pendingICloudFiles > 0 {
+                    HStack {
+                        Spacer(minLength: 8)
+                        Text(pendingICloudNoteText)
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(Theme.textMuted.swiftUIColor)
+                            .lineLimit(1)
+                    }
+                }
             }
 
             // Ring gauges row
@@ -339,7 +381,7 @@ struct StatisticsContentView: View {
                 )
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(height: 70)
     }
 }
 
@@ -412,7 +454,7 @@ private struct SidebarRowView: View {
                 .frame(width: 26, height: 26)
 
                 Text(title)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(Theme.textPrimary.swiftUIColor)
                     .lineLimit(1)
 
@@ -637,7 +679,7 @@ private struct TokensPerDayCardView: View {
                                 .fill(provider.seriesColor.swiftUIColor)
                                 .frame(width: 9, height: 9)
                             Text(provider.displayName)
-                                .font(.system(size: 11))
+                                .font(.system(size: 11, weight: .regular))
                                 .foregroundStyle(Theme.textSecondary.swiftUIColor)
                         }
                     }
@@ -689,11 +731,11 @@ private struct TokensPerDayCardView: View {
                         ForEach(summary.dailyBars) { bar in
                             Color.clear
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 13)
+                                .frame(height: 12)
                                 .overlay {
                                     if !bar.axisLabel.isEmpty {
                                         Text(bar.axisLabel)
-                                            .font(.system(size: 10))
+                                            .font(.system(size: 10, weight: .regular))
                                             .foregroundStyle(Theme.textMuted.swiftUIColor)
                                             .fixedSize()
                                     }
@@ -771,11 +813,12 @@ private struct MostUsedModelsCardView: View {
                             .frame(width: 13, height: 13)
                             .frame(width: 16, alignment: .leading)
 
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 3) {
                             modelNameText(row)
-                                .font(.system(size: 12))
+                                .font(.system(size: 12, weight: .regular))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
+                                .frame(height: 14, alignment: .leading)
 
                             ModelShareBarView(
                                 fraction: row.relativeToTop,

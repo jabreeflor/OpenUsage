@@ -4,7 +4,7 @@ import Darwin
 import Foundation
 
 /// Lightweight POSIX file metadata obtained via `lstat` or `fstat` without materializing iCloud-evicted files.
-public struct FileMetadata: Sendable, Equatable, Codable {
+public struct FileMetadata: Sendable, Equatable, Hashable, Codable {
     public let size: UInt64
     public let mtimeNanos: Int64
     public let inode: UInt64
@@ -102,11 +102,18 @@ public struct LineReadResult: Sendable, Equatable {
     public let consumedOffset: UInt64
     public let eofOffset: UInt64
     public let consumedFingerprint: String
+    public let eofFingerprint: String
 
-    public init(consumedOffset: UInt64, eofOffset: UInt64, consumedFingerprint: String) {
+    public init(
+        consumedOffset: UInt64,
+        eofOffset: UInt64,
+        consumedFingerprint: String,
+        eofFingerprint: String? = nil
+    ) {
         self.consumedOffset = consumedOffset
         self.eofOffset = eofOffset
         self.consumedFingerprint = consumedFingerprint
+        self.eofFingerprint = eofFingerprint ?? consumedFingerprint
     }
 }
 
@@ -131,9 +138,14 @@ public enum StreamingLineReader {
 
     /// Verifies that the path still resolves to the exact same regular file (`st_dev`, `st_ino`)
     /// and that neither the open descriptor nor the path changed size or mtime since `openMeta`.
-    public static func verifyUnchanged(at url: URL, fd: Int32, since openMeta: FileMetadata) -> Bool {
-        guard let fdMetaAfter = FileMetadata.read(fd: fd),
-              let pathMetaAfter = FileMetadata.read(at: url) else {
+    public static func verifyUnchanged(
+        at url: URL,
+        fd: Int32,
+        since openMeta: FileMetadata,
+        fileAccess: any TokenLogFileAccess = SystemTokenLogFileAccess()
+    ) -> Bool {
+        guard let fdMetaAfter = fileAccess.readMetadata(fd: fd),
+              let pathMetaAfter = fileAccess.readMetadata(at: url) else {
             return false
         }
         guard fdMetaAfter.isRegularFile, !fdMetaAfter.isDataless,
@@ -320,7 +332,8 @@ public enum StreamingLineReader {
         return LineReadResult(
             consumedOffset: consumedOffset,
             eofOffset: currentFileOffset,
-            consumedFingerprint: hexDigest(of: committedHasher)
+            consumedFingerprint: hexDigest(of: committedHasher),
+            eofFingerprint: hexDigest(of: runningHasher)
         )
     }
 
@@ -385,10 +398,14 @@ public enum StreamingLineReader {
     /// Computes a full streaming SHA-256 fingerprint of the consumed prefix `0..<offset` of `url`
     /// using a bounded 64 KB buffer without retaining raw log bytes. Returns `nil` if the file
     /// cannot be read or ends before `offset`.
-    public static func prefixFingerprint(at url: URL, upToOffset offset: UInt64) -> String? {
-        let fd = openReadOnly(at: url)
+    public static func prefixFingerprint(
+        at url: URL,
+        upToOffset offset: UInt64,
+        fileAccess: any TokenLogFileAccess = SystemTokenLogFileAccess()
+    ) -> String? {
+        let fd = fileAccess.openReadOnly(at: url, allowMaterialization: false)
         guard fd >= 0 else { return nil }
-        defer { _ = Darwin.close(fd) }
+        defer { fileAccess.close(fd: fd) }
 
         guard let hasher = prefixHasher(fd: fd, upToOffset: offset) else {
             return nil

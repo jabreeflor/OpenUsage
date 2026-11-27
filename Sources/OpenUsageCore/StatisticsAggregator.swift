@@ -199,18 +199,41 @@ public struct StatisticsSummary: Sendable, Equatable {
     }
 }
 
-/// Determines whether the "Limits hit" KPI has real historical coverage for the selected range.
+/// Determines whether the "Limits hit" KPI has sufficient observed history for the selected scope and range.
 /// A current live snapshot only shows present utilization and cannot establish zero hits over 7D/30D.
 public enum StatisticsLimitHitPolicy {
+    /// Minimum fraction of the selected range that must be covered by observed intervals for each provider in scope.
+    public static let minimumCoverageRatio: Double = 0.90
+    private static let boundaryEpsilon: Double = 1e-9
+
+    /// Returns `true` when the "Limits hit" KPI can be displayed numerically.
+    /// - In demo mode, always `true`.
+    /// - In live mode, the scope is `[provider]` for `.provider(provider)` or `connectedProviders` for `.overview`.
+    ///   Returns `true` only when the scope is non-empty and every provider in scope has observed intervals
+    ///   covering at least 90% of `range`.
     public static func isAvailable(
         isDemo: Bool,
-        historicalCoverageDays: Int,
-        range: StatisticsRange
+        filter: StatisticsFilter,
+        connectedProviders: [ProviderID],
+        range: StatisticsRange,
+        coverageRatioForProvider: (ProviderID) -> Double
     ) -> Bool {
         if isDemo {
             return true
         }
-        return historicalCoverageDays >= range.dayCount
+        let scopeProviders: [ProviderID] = switch filter {
+        case .overview:
+            connectedProviders
+        case .provider(let id):
+            [id]
+        }
+        guard !scopeProviders.isEmpty else {
+            return false
+        }
+        return scopeProviders.allSatisfy { provider in
+            let ratio = coverageRatioForProvider(provider)
+            return ratio.isFinite && (ratio + boundaryEpsilon) >= minimumCoverageRatio
+        }
     }
 }
 

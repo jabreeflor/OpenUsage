@@ -41,12 +41,15 @@ final class AppStore: Observable {
     private var _isRefreshing: Bool = false
     private var _isDropdownOpen: Bool = false
     private var _lastRefreshedAt: Date?
+    private var _pendingICloudFiles: Int = 0
 
     private var refreshScheduler: RefreshScheduler?
     private let tokenLogCoordinator: LocalTokenLogCoordinator?
+    private let limitHitHistoryStore: LimitHitHistoryStore?
     private var localLogPipeline: LocalLogPipelineController?
     private let watchBackend: (any DirectoryWatchBackend)?
     private let watchScheduler: any DirectoryWatchScheduler
+    private let clock: @Sendable () -> Date
 
     var snapshots: [ProviderSnapshot] {
         accounts.snapshots
@@ -126,18 +129,29 @@ final class AppStore: Observable {
         return _lastRefreshedAt
     }
 
+    var pendingICloudFiles: Int {
+        if options.isDemo {
+            return 0
+        }
+        _$observationRegistrar.access(self, keyPath: \.pendingICloudFiles)
+        return _pendingICloudFiles
+    }
+
     init(
         options: LaunchOptions,
         thresholds: ThresholdSettings? = nil,
         localSources: LocalSourceSettings? = nil,
         providers: [any UsageProvider]? = nil,
         tokenLogCoordinator: LocalTokenLogCoordinator? = nil,
+        limitHitHistoryStore: LimitHitHistoryStore? = nil,
         watchBackend: (any DirectoryWatchBackend)? = nil,
-        watchScheduler: any DirectoryWatchScheduler = DispatchDirectoryWatchScheduler()
+        watchScheduler: any DirectoryWatchScheduler = DispatchDirectoryWatchScheduler(),
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.options = options
         self.watchBackend = watchBackend
         self.watchScheduler = watchScheduler
+        self.clock = clock
         self.thresholds = thresholds ?? ThresholdSettings.forLaunch(isDemo: options.isDemo)
         self.localSources = localSources ?? LocalSourceSettings.forLaunch(
             isDemo: options.isDemo,
@@ -168,6 +182,7 @@ final class AppStore: Observable {
             self._todayUsage = DemoFixtures.todayUsage()
             self._lastRefreshedAt = DemoFixtures.referenceDate
             self.tokenLogCoordinator = nil
+            self.limitHitHistoryStore = nil
         } else {
             initialSnapshots = ProviderID.allCases.map {
                 ProviderSnapshot(
@@ -178,9 +193,11 @@ final class AppStore: Observable {
                     connectedVia: "Not connected"
                 )
             }
+            let historyStore = limitHitHistoryStore ?? LimitHitHistoryStore(clock: clock)
+            self.limitHitHistoryStore = historyStore
             self._tokenBuckets = []
             self._bucketsBySource = [:]
-            self._limitHitEvents = []
+            self._limitHitEvents = historyStore.limitHitEvents(at: clock())
             self._todayUsage = .empty
             self._lastRefreshedAt = nil
             self.tokenLogCoordinator = tokenLogCoordinator ?? LocalTokenLogCoordinator()
@@ -201,12 +218,20 @@ final class AppStore: Observable {
         )
     }
 
-    func statisticsSummary(now: Date = Date()) -> StatisticsSummary {
-        let anchorDate = options.isDemo ? DemoFixtures.referenceDate : now
-        let hasLimitData = hasRealLimitData(for: statisticsFilter)
+    func statisticsSummary(now: Date? = nil) -> StatisticsSummary {
+        let effectiveNow = now ?? clock()
+        let anchorDate = options.isDemo ? DemoFixtures.referenceDate : effectiveNow
+        let hasLimitData = hasRealLimitData(for: statisticsFilter, now: anchorDate)
+        let events: [LimitHitEvent]
+        if options.isDemo {
+            events = limitHitEvents
+        } else {
+            _ = limitHitEvents
+            events = limitHitHistoryStore?.limitHitEvents(at: anchorDate) ?? []
+        }
         return StatisticsAggregator.summarize(
             buckets: tokenBuckets,
-            limitHits: limitHitEvents,
+            limitHits: events,
             limitsHitAvailable: hasLimitData,
             range: statisticsRange,
             filter: statisticsFilter,
@@ -214,13 +239,21 @@ final class AppStore: Observable {
         )
     }
 
-    private func hasRealLimitData(for filter: StatisticsFilter) -> Bool {
-        // Live provider snapshots only represent current utilization, not historical 7D/30D coverage.
-        // Keep the "Limits hit" KPI unavailable until historical coverage exists for the selected range.
-        StatisticsLimitHitPolicy.isAvailable(
-            isDemo: options.isDemo,
-            historicalCoverageDays: 0,
-            range: statisticsRange
+    private func hasRealLimitData(for filter: StatisticsFilter, now: Date) -> Bool {
+        if options.isDemo {
+            return true
+        }
+        guard let historyStore = limitHitHistoryStore else {
+            return false
+        }
+        let connectedProviders = snapshots
+            .filter { $0.connectionState == .connected }
+            .map(\.provider)
+        return historyStore.hasSufficientCoverage(
+            for: filter,
+            connectedProviders: connectedProviders,
+            range: statisticsRange,
+            at: now
         )
     }
 
@@ -246,10 +279,12 @@ final class AppStore: Observable {
         localSources.toggle(source)
         guard !options.isDemo else { return }
         let isNowEnabled = localSources.isEnabled(source)
+        let pipeline = ensureLocalLogPipeline()
+        pipeline?.syncEnabledSources()
         Task { [weak self] in
             guard let self else { return }
-            let pipeline = self.ensureLocalLogPipeline()
-            await pipeline?.handleSourceToggled(isNowEnabled: isNowEnabled)
+            let activePipeline = self.ensureLocalLogPipeline()
+            await activePipeline?.handleSourceToggled(isNowEnabled: isNowEnabled)
         }
     }
 
@@ -272,12 +307,19 @@ final class AppStore: Observable {
         }
 
         await accounts.refreshAll()
+        let now = clock()
         if !options.isDemo {
+            if let historyStore = limitHitHistoryStore {
+                _ = historyStore.observe(snapshots: accounts.snapshots, at: now)
+                let updatedEvents = historyStore.limitHitEvents(at: now)
+                _$observationRegistrar.withMutation(of: self, keyPath: \.limitHitEvents) {
+                    _limitHitEvents = updatedEvents
+                }
+            }
             let pipeline = ensureLocalLogPipeline()
             await pipeline?.refreshLogs()
         }
 
-        let now = Date()
         _$observationRegistrar.withMutation(of: self, keyPath: \.lastRefreshedAt) {
             _lastRefreshedAt = options.isDemo ? DemoFixtures.referenceDate : now
         }
@@ -308,6 +350,14 @@ final class AppStore: Observable {
                     self._$observationRegistrar.withMutation(of: self, keyPath: \.lastRefreshedAt) {
                         self._lastRefreshedAt = refreshedAt
                     }
+                }
+            },
+            onPendingICloudFilesChanged: { [weak self] pendingCount in
+                guard let self, !self.options.isDemo else { return }
+                let clamped = max(0, pendingCount)
+                guard self._pendingICloudFiles != clamped else { return }
+                self._$observationRegistrar.withMutation(of: self, keyPath: \.pendingICloudFiles) {
+                    self._pendingICloudFiles = clamped
                 }
             }
         )
