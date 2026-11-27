@@ -23,6 +23,7 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
     public let limits: [UsageLimit]
     public let connectedVia: String
     public let updatedAt: Date
+    public let showMenuBarPlaceholderWhileConnecting: Bool
 
     public init(
         provider: ProviderID,
@@ -30,7 +31,8 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
         connectionState: ConnectionState,
         limits: [UsageLimit],
         connectedVia: String,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        showMenuBarPlaceholderWhileConnecting: Bool = false
     ) {
         self.provider = provider
         self.plan = plan
@@ -38,6 +40,7 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
         self.limits = limits
         self.connectedVia = connectedVia
         self.updatedAt = updatedAt
+        self.showMenuBarPlaceholderWhileConnecting = showMenuBarPlaceholderWhileConnecting
     }
 
     /// Returns the limit with the highest percent used. Ties break to the first occurrence.
@@ -56,8 +59,10 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
                 return .connected(percent: fullest.percentUsed)
             }
             return .dimmedPlaceholder
-        case .expired, .connecting:
+        case .expired:
             return .dimmedPlaceholder
+        case .connecting:
+            return showMenuBarPlaceholderWhileConnecting ? .dimmedPlaceholder : .omitted
         case .notConnected, .unsupported:
             return .omitted
         }

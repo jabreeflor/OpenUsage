@@ -14,6 +14,7 @@ enum SnapshotExporter {
         try exportMenuBarSnapshots(to: directory)
         try exportDropdownSnapshots(to: directory)
         try exportStatisticsSnapshots(to: directory)
+        try exportAccountsSnapshots(to: directory)
     }
 
     static func exportMenuBarSnapshots(to directory: URL) throws {
@@ -99,6 +100,32 @@ enum SnapshotExporter {
         }
     }
 
+    static func exportAccountsSnapshots(to directory: URL) throws {
+        let targets: [(scenario: DemoScenario, filename: String)] = [
+            (.connecting, "accounts-connecting.png"),
+            (.all, "accounts-all.png")
+        ]
+
+        for target in targets {
+            let view = AccountsContentView(
+                snapshots: DemoFixtures.snapshots(for: target.scenario),
+                enabledSources: LocalSourceSettings.defaultMap(for: target.scenario),
+                yellowFrom: DepletionColor.defaultYellowThreshold,
+                redFrom: DepletionColor.defaultRedThreshold,
+                selectedTab: .accounts,
+                showsSimulatedTrafficLights: true,
+                onSelectTab: { _ in },
+                onSignIn: { _ in },
+                onSignOut: { _ in },
+                onToggleSource: { _ in },
+                onApplyYellowInput: { _ in false },
+                onApplyRedInput: { _ in false }
+            )
+            let outputURL = directory.appendingPathComponent(target.filename)
+            try writeSwiftUIViewPNG(view, to: outputURL, scale: 2.0)
+        }
+    }
+
     private static func writeSwiftUIViewPNG<V: View>(
         _ view: V,
         to url: URL,
@@ -115,6 +142,14 @@ enum SnapshotExporter {
             )
         }
 
+        try writePNG(cgImage, to: url, scale: scale)
+    }
+
+    private static func writePNG(
+        _ cgImage: CGImage,
+        to url: URL,
+        scale: CGFloat
+    ) throws {
         guard let destination = CGImageDestinationCreateWithURL(
             url as CFURL,
             UTType.png.identifier as CFString,

@@ -44,6 +44,10 @@ enum Theme {
     static let linkHoverColor = SRGBColor(hex: "#BFDBFE")
     static let neutralButtonFill = SRGBColor(hex: "#F4F4F5")
     static let neutralButtonText = SRGBColor(hex: "#17191E")
+    static let checkboxBlue = SRGBColor(hex: "#2563EB")
+    static let checkboxBorder = SRGBColor(hex: "#52525B")
+    static let pillConnectedBg = SRGBColor(red: 74.0 / 255.0, green: 222.0 / 255.0, blue: 128.0 / 255.0, alpha: 0.14, hex: "#4ADE8024")
+    static let pillNeedsBg = SRGBColor(red: 250.0 / 255.0, green: 204.0 / 255.0, blue: 21.0 / 255.0, alpha: 0.14, hex: "#FACC1524")
     static let menuBarBackground = SRGBColor(hex: "#1D2026")
     static let modelShades: [SRGBColor] = [
         SRGBColor(hex: "#E4E4E7"),

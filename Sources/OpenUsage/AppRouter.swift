@@ -35,7 +35,8 @@ final class AppRouter: Observable {
             contentMinSize: NSSize(width: 1000, height: 748),
             rootView: StatisticsWindowView(store: store),
             fullSizeContent: true,
-            inlineHeaderHeight: 52
+            inlineHeaderHeight: 52,
+            useUnifiedToolbar: true
         )
         statisticsWindow = window
         present(window)
@@ -47,20 +48,22 @@ final class AppRouter: Observable {
             _focusedAccountProvider = provider
         }
         if let existing = accountsWindow {
-            present(existing)
+            present(existing, clearInitialFocus: true)
             return
         }
 
         let window = makeDarkWindow(
             title: "Accounts",
-            contentSize: NSSize(width: 780, height: 620),
-            contentMinSize: NSSize(width: 540, height: 360),
-            rootView: PlaceholderAccountsView(store: store, router: self),
-            fullSizeContent: false,
-            inlineHeaderHeight: nil
+            contentSize: NSSize(width: 780, height: 652),
+            contentMinSize: NSSize(width: 780, height: 652),
+            rootView: AccountsWindowView(store: store, router: self),
+            fullSizeContent: true,
+            inlineHeaderHeight: 36,
+            useUnifiedToolbar: false
         )
+        window.initialFirstResponder = nil
         accountsWindow = window
-        present(window)
+        present(window, clearInitialFocus: true)
     }
 
     func quit() {
@@ -73,7 +76,8 @@ final class AppRouter: Observable {
         contentMinSize: NSSize,
         rootView: Content,
         fullSizeContent: Bool,
-        inlineHeaderHeight: CGFloat?
+        inlineHeaderHeight: CGFloat?,
+        useUnifiedToolbar: Bool
     ) -> NSWindow {
         var mask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         if fullSizeContent {
@@ -88,7 +92,8 @@ final class AppRouter: Observable {
                 styleMask: mask,
                 backing: .buffered,
                 defer: false,
-                headerHeight: inlineHeaderHeight
+                headerHeight: inlineHeaderHeight,
+                useUnifiedToolbar: useUnifiedToolbar
             )
         } else {
             window = NSWindow(
@@ -139,10 +144,16 @@ final class AppRouter: Observable {
         return window
     }
 
-    private func present(_ window: NSWindow) {
+    private func present(_ window: NSWindow, clearInitialFocus: Bool = false) {
+        if clearInitialFocus, let inlineWindow = window as? InlineTitleBarWindow {
+            inlineWindow.suppressInitialTextFieldFocus()
+        }
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        if clearInitialFocus {
+            window.makeFirstResponder(nil)
+        }
         if let inlineWindow = window as? InlineTitleBarWindow {
             inlineWindow.positionTrafficLights()
         }
@@ -150,6 +161,9 @@ final class AppRouter: Observable {
         DispatchQueue.main.async {
             NSApplication.shared.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
+            if clearInitialFocus {
+                window.makeFirstResponder(nil)
+            }
             if let inlineWindow = window as? InlineTitleBarWindow {
                 inlineWindow.positionTrafficLights()
             }
@@ -177,29 +191,68 @@ final class AppRouter: Observable {
 }
 
 /// Dark `NSWindow` whose native traffic light buttons sit vertically centered inside a custom-height
-/// transparent inline header row (e.g. 52 pt) left of the header title.
+/// transparent inline header row left of the header title.
 @MainActor
 private final class InlineTitleBarWindow: NSWindow {
     private let headerHeight: CGFloat
     private let trafficLightLeading: CGFloat = 16
     private let trafficLightSpacing: CGFloat = 20
+    private var suppressAutoTextFocus = false
+    private var suppressionToken: UInt64 = 0
 
     init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
         backing backingStoreType: NSWindow.BackingStoreType,
         defer flag: Bool,
-        headerHeight: CGFloat
+        headerHeight: CGFloat,
+        useUnifiedToolbar: Bool
     ) {
         self.headerHeight = headerHeight
         super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
 
-        // Attach an empty unified toolbar so AppKit sizes the native titlebar container to 52 pt
-        // without drawing a separator, keeping traffic lights unclipped and natively draggable.
-        let toolbar = NSToolbar(identifier: NSToolbar.Identifier("dev.jabree.OpenUsage.InlineHeader"))
-        self.toolbar = toolbar
-        self.toolbarStyle = .unified
-        self.titlebarSeparatorStyle = .none
+        if useUnifiedToolbar {
+            // Attach an empty unified toolbar so AppKit sizes the native titlebar container to 52 pt
+            // without drawing a separator, keeping traffic lights unclipped and natively draggable.
+            let toolbar = NSToolbar(identifier: NSToolbar.Identifier("dev.jabree.OpenUsage.InlineHeader"))
+            self.toolbar = toolbar
+            self.toolbarStyle = .unified
+            self.titlebarSeparatorStyle = .none
+        }
+    }
+
+    /// Prevents AppKit / SwiftUI from automatically focusing text fields while the window is first presented,
+    /// while preserving normal focus via mouse click or keyboard navigation (`Tab`).
+    func suppressInitialTextFieldFocus() {
+        suppressAutoTextFocus = true
+        suppressionToken &+= 1
+        let expectedToken = suppressionToken
+        makeFirstResponder(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.suppressionToken == expectedToken else { return }
+            self.suppressAutoTextFocus = false
+        }
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        if suppressAutoTextFocus {
+            switch event.type {
+            case .leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown:
+                suppressAutoTextFocus = false
+            default:
+                break
+            }
+        }
+        super.sendEvent(event)
+    }
+
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        if suppressAutoTextFocus,
+           let responder,
+           responder is NSText || responder is NSTextField {
+            return false
+        }
+        return super.makeFirstResponder(responder)
     }
 
     override func layoutIfNeeded() {
@@ -217,7 +270,7 @@ private final class InlineTitleBarWindow: NSWindow {
         let buttons = buttonTypes.compactMap { standardWindowButton($0) }
         guard let titlebarView = buttons.first?.superview else { return }
 
-        // Compute the vertical center of the 52-pt header row in the titlebar view's coordinate space.
+        // Compute the vertical center of the inline title row in the titlebar view's coordinate space.
         let targetCenterY = titlebarView.convert(
             NSPoint(x: 0, y: frame.height - headerHeight / 2.0),
             from: nil
@@ -230,39 +283,5 @@ private final class InlineTitleBarWindow: NSWindow {
                 button.setFrameOrigin(NSPoint(x: x, y: y))
             }
         }
-    }
-}
-
-struct PlaceholderAccountsView: View {
-    let store: AppStore
-    let router: AppRouter
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Accounts")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Theme.textPrimary.swiftUIColor)
-            if let focused = router.focusedAccountProvider {
-                Text("Selected subscription: \(focused.displayName)")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary.swiftUIColor)
-            }
-            Text("Subscription connections, local log sources, and depletion thresholds will be implemented in Milestone 4.")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.textMuted.swiftUIColor)
-            Spacer()
-        }
-        .padding(24)
-        .frame(
-            minWidth: 540,
-            idealWidth: 780,
-            maxWidth: .infinity,
-            minHeight: 360,
-            idealHeight: 620,
-            maxHeight: .infinity,
-            alignment: .topLeading
-        )
-        .background(Theme.background.swiftUIColor)
-        .preferredColorScheme(.dark)
     }
 }

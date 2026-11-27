@@ -13,9 +13,9 @@ final class AppStore: Observable {
 
     let options: LaunchOptions
     let thresholds: ThresholdSettings
-    private let providers: [any UsageProvider]
+    let localSources: LocalSourceSettings
+    let accounts: AccountsController
 
-    private var _snapshots: [ProviderSnapshot]
     private var _tokenBuckets: [TokenBucket]
     private var _limitHitEvents: [LimitHitEvent]
     private var _todayUsage: TodayUsageSummary
@@ -29,8 +29,7 @@ final class AppStore: Observable {
     private var refreshScheduler: RefreshScheduler?
 
     var snapshots: [ProviderSnapshot] {
-        _$observationRegistrar.access(self, keyPath: \.snapshots)
-        return _snapshots
+        accounts.snapshots
     }
 
     var tokenBuckets: [TokenBucket] {
@@ -102,31 +101,38 @@ final class AppStore: Observable {
     init(
         options: LaunchOptions,
         thresholds: ThresholdSettings? = nil,
+        localSources: LocalSourceSettings? = nil,
         providers: [any UsageProvider]? = nil
     ) {
         self.options = options
         self.thresholds = thresholds ?? ThresholdSettings.forLaunch(isDemo: options.isDemo)
+        self.localSources = localSources ?? LocalSourceSettings.forLaunch(
+            isDemo: options.isDemo,
+            demoScenario: options.demoScenario
+        )
         self._selectedTile = .provider(options.selectedProvider ?? .claude)
         self._statisticsRange = options.statisticsRange
         self._statisticsFilter = options.statisticsFilter
 
+        let resolvedProviders: [any UsageProvider]
         if let providers {
-            self.providers = providers
+            resolvedProviders = providers
         } else if options.isDemo {
-            self.providers = DemoFixtures.providers(for: options.demoScenario)
+            resolvedProviders = DemoFixtures.providers(for: options.demoScenario)
         } else {
-            self.providers = ProviderID.allCases.map { UnconfiguredUsageProvider(provider: $0) }
+            resolvedProviders = ProviderID.allCases.map { UnconfiguredUsageProvider(provider: $0) }
         }
 
+        let initialSnapshots: [ProviderSnapshot]
         if options.isDemo {
             let buckets = DemoFixtures.tokenBuckets()
-            self._snapshots = DemoFixtures.snapshots(for: options.demoScenario)
+            initialSnapshots = DemoFixtures.snapshots(for: options.demoScenario)
             self._tokenBuckets = buckets
             self._limitHitEvents = DemoFixtures.limitHitEvents()
             self._todayUsage = DemoFixtures.todayUsage()
             self._lastRefreshedAt = DemoFixtures.referenceDate
         } else {
-            self._snapshots = ProviderID.allCases.map {
+            initialSnapshots = ProviderID.allCases.map {
                 ProviderSnapshot(
                     provider: $0,
                     plan: "",
@@ -140,6 +146,12 @@ final class AppStore: Observable {
             self._todayUsage = .empty
             self._lastRefreshedAt = nil
         }
+
+        self.accounts = AccountsController(
+            isDemo: options.isDemo,
+            initialSnapshots: initialSnapshots,
+            providers: resolvedProviders
+        )
 
         self.refreshScheduler = RefreshScheduler(
             lastRefreshDate: options.isDemo ? Date() : nil,
@@ -169,13 +181,7 @@ final class AppStore: Observable {
     }
 
     func snapshot(for provider: ProviderID) -> ProviderSnapshot {
-        snapshots.first(where: { $0.provider == provider }) ?? ProviderSnapshot(
-            provider: provider,
-            plan: "",
-            connectionState: .notConnected,
-            limits: [],
-            connectedVia: "Not connected"
-        )
+        accounts.snapshot(for: provider)
     }
 
     func startRefreshScheduler() {
@@ -200,26 +206,8 @@ final class AppStore: Observable {
             }
         }
 
-        var updated: [ProviderID: ProviderSnapshot] = [:]
-        await withTaskGroup(of: ProviderSnapshot?.self) { group in
-            for provider in providers {
-                group.addTask {
-                    try? await provider.fetchSnapshot()
-                }
-            }
-            for await snapshot in group {
-                if let snapshot {
-                    updated[snapshot.provider] = snapshot
-                }
-            }
-        }
+        await accounts.refreshAll()
 
-        let nextSnapshots = ProviderID.allCases.compactMap { id in
-            updated[id] ?? _snapshots.first(where: { $0.provider == id })
-        }
-        _$observationRegistrar.withMutation(of: self, keyPath: \.snapshots) {
-            _snapshots = nextSnapshots
-        }
         let now = Date()
         _$observationRegistrar.withMutation(of: self, keyPath: \.lastRefreshedAt) {
             _lastRefreshedAt = options.isDemo ? DemoFixtures.referenceDate : now

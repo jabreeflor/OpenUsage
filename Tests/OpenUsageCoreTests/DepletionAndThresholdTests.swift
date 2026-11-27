@@ -156,4 +156,33 @@ final class ThresholdSettingsTests: XCTestCase {
         XCTAssertEqual(nextDemo.yellowFrom, 50)
         XCTAssertEqual(nextDemo.redFrom, 80)
     }
+
+    func testStringInputParsingAndEditingValidation() {
+        let settings = ThresholdSettings(defaults: defaults)
+
+        // Raising red threshold to 90 turns Claude's 81% from red to yellow
+        XCTAssertEqual(settings.level(for: 81), .red)
+        XCTAssertTrue(settings.applyRedInput("90"))
+        XCTAssertEqual(settings.redFrom, 90)
+        XCTAssertEqual(settings.level(for: 81), .yellow)
+        XCTAssertEqual(settings.level(for: 90), .red)
+
+        // Accepts trailing % and surrounding whitespace
+        XCTAssertTrue(settings.applyYellowInput(" 40% "))
+        XCTAssertEqual(settings.yellowFrom, 40)
+        XCTAssertTrue(settings.applyRedInput("85%"))
+        XCTAssertEqual(settings.redFrom, 85)
+
+        // Rejects non-numeric, empty, negative, decimal, out-of-range, and inverted values
+        for invalid in ["", "   ", "abc", "-5", "40.5", "0", "85", "90", "101", "50%%"] {
+            XCTAssertFalse(settings.applyYellowInput(invalid), "Expected yellow input '\(invalid)' to be rejected")
+        }
+        for invalid in ["", "   ", "xyz", "-1", "85.2", "0", "40", "35", "101", "90px"] {
+            XCTAssertFalse(settings.applyRedInput(invalid), "Expected red input '\(invalid)' to be rejected")
+        }
+
+        // Previous valid thresholds remain intact
+        XCTAssertEqual(settings.yellowFrom, 40)
+        XCTAssertEqual(settings.redFrom, 85)
+    }
 }

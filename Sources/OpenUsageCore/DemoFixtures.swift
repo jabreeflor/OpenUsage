@@ -222,7 +222,8 @@ public enum DemoFixtures {
                 connectionState: .connecting,
                 limits: [],
                 connectedVia: "Finish signing in in your browser",
-                updatedAt: referenceDate
+                updatedAt: referenceDate,
+                showMenuBarPlaceholderWhileConnecting: true
             )
 
         case (.opencode, .all):
@@ -539,6 +540,21 @@ public struct DemoUsageProvider: UsageProvider, Sendable {
 
     public func fetchSnapshot() async throws -> ProviderSnapshot {
         DemoFixtures.snapshot(for: provider, scenario: scenario)
+    }
+
+    public func signIn() async throws -> ProviderSnapshot {
+        DemoFixtures.snapshot(for: provider, scenario: .all)
+    }
+
+    public func signOut() async throws -> ProviderSnapshot {
+        ProviderSnapshot(
+            provider: provider,
+            plan: "",
+            connectionState: .notConnected,
+            limits: [],
+            connectedVia: "Not connected",
+            updatedAt: DemoFixtures.referenceDate
+        )
     }
 }
 
