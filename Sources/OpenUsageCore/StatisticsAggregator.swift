@@ -199,6 +199,21 @@ public struct StatisticsSummary: Sendable, Equatable {
     }
 }
 
+/// Determines whether the "Limits hit" KPI has real historical coverage for the selected range.
+/// A current live snapshot only shows present utilization and cannot establish zero hits over 7D/30D.
+public enum StatisticsLimitHitPolicy {
+    public static func isAvailable(
+        isDemo: Bool,
+        historicalCoverageDays: Int,
+        range: StatisticsRange
+    ) -> Bool {
+        if isDemo {
+            return true
+        }
+        return historicalCoverageDays >= range.dayCount
+    }
+}
+
 public enum StatisticsAggregator {
     private static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     private static let weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]

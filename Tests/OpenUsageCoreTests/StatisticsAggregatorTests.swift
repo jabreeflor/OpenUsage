@@ -495,4 +495,36 @@ final class StatisticsAggregatorTests: XCTestCase {
         XCTAssertTrue(report.contains("claude: total=\(Int.max)"))
         XCTAssertTrue(report.contains("all: total=\(Int.max)"))
     }
+
+    func testLiveLimitsHitRemainsUnavailableWithoutHistoricalCoverage() {
+        let calendar = StatisticsAggregator.gregorianCalendar(timeZone: TimeZone(secondsFromGMT: 0)!)
+        let anchor = makeDate(year: 2026, month: 11, day: 26, calendar: calendar)
+
+        // Demo mode has fixture historical coverage for both 7D and 30D.
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: true, historicalCoverageDays: 0, range: .sevenDays))
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: true, historicalCoverageDays: 0, range: .thirtyDays))
+
+        // Live mode without full historical coverage for the selected range must stay unavailable (never invent 0).
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 0, range: .sevenDays))
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 0, range: .thirtyDays))
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 6, range: .sevenDays))
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 7, range: .sevenDays))
+        XCTAssertFalse(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 7, range: .thirtyDays))
+        XCTAssertTrue(StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 30, range: .thirtyDays))
+
+        let liveSummary = StatisticsAggregator.summarize(
+            buckets: [
+                TokenBucket(dayKey: "2026-11-26", hour: 12, provider: .claude, model: "claude-opus-4.5", inputTokens: 1_000, outputTokens: 200, cacheTokens: 0, requests: 2)
+            ],
+            limitHits: [],
+            limitsHitAvailable: StatisticsLimitHitPolicy.isAvailable(isDemo: false, historicalCoverageDays: 0, range: .sevenDays),
+            range: .sevenDays,
+            filter: .overview,
+            anchorDate: anchor,
+            calendar: calendar
+        )
+        XCTAssertFalse(liveSummary.limitsHitAvailable)
+        XCTAssertEqual(liveSummary.limitsHitDisplayText, "\u{2013}")
+        XCTAssertNotEqual(liveSummary.limitsHitDisplayText, "0")
+    }
 }

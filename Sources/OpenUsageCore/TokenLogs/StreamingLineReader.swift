@@ -34,13 +34,32 @@ public struct FileMetadata: Sendable, Equatable, Codable {
 
     /// Reads file metadata using `lstat`. Never follows symlinks and never triggers iCloud downloads.
     public static func read(at url: URL) -> FileMetadata? {
+        try? readOrThrow(at: url)
+    }
+
+    /// Reads file metadata using `lstat`, returning `nil` only when the path does not exist (`ENOENT` / `ENOTDIR`)
+    /// and throwing `POSIXError` for filesystem errors such as permission denial (`EACCES`).
+    public static func readOrThrow(at url: URL) throws -> FileMetadata? {
         var st = stat()
+        var statErrno: Int32 = 0
         let result = url.withUnsafeFileSystemRepresentation { ptr -> Int32 in
-            guard let ptr else { return -1 }
-            return lstat(ptr, &st)
+            guard let ptr else {
+                statErrno = EINVAL
+                return -1
+            }
+            let rc = lstat(ptr, &st)
+            if rc != 0 {
+                statErrno = errno
+            }
+            return rc
         }
-        guard result == 0 else { return nil }
-        return from(stat: st)
+        if result == 0 {
+            return from(stat: st)
+        }
+        if statErrno == ENOENT || statErrno == ENOTDIR {
+            return nil
+        }
+        throw POSIXError(POSIXErrorCode(rawValue: statErrno) ?? .EIO)
     }
 
     /// Reads file metadata using `fstat` on an already-open descriptor.

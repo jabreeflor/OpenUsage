@@ -19,10 +19,17 @@ public struct ContinuousAccountsSleeper: AccountsSleeper {
 public final class AccountsController: Observable {
     public static let demoSignInDuration: Duration = .milliseconds(2500)
     public static let demoInitialConnectingDuration: Duration = .milliseconds(6000)
+    public static let defaultProviderRefreshTimeout: Duration = .seconds(15)
 
     private struct InFlightOperation {
         let generation: UInt64
         let task: Task<Void, Never>
+    }
+
+    private enum SingleFetchOutcome: Sendable {
+        case success(ProviderSnapshot)
+        case transientFailure(ProviderSnapshot?)
+        case cancelled
     }
 
     private let _$observationRegistrar = ObservationRegistrar()
@@ -32,10 +39,14 @@ public final class AccountsController: Observable {
     private let sleeper: any AccountsSleeper
     private let signInDuration: Duration
     private let initialConnectingDuration: Duration
+    private let providerRefreshTimeout: Duration
+    private let clock: @Sendable () -> Date
 
     private var _snapshots: [ProviderSnapshot]
     private var providerGenerations: [ProviderID: UInt64] = [:]
     private var inFlightOperations: [ProviderID: InFlightOperation] = [:]
+    private var consecutiveFailures: [ProviderID: Int] = [:]
+    private var backoffUntil: [ProviderID: Date] = [:]
 
     public var snapshots: [ProviderSnapshot] {
         _$observationRegistrar.access(self, keyPath: \.snapshots)
@@ -48,13 +59,17 @@ public final class AccountsController: Observable {
         providers: [any UsageProvider],
         sleeper: any AccountsSleeper = ContinuousAccountsSleeper(),
         signInDuration: Duration = AccountsController.demoSignInDuration,
-        initialConnectingDuration: Duration = AccountsController.demoInitialConnectingDuration
+        initialConnectingDuration: Duration = AccountsController.demoInitialConnectingDuration,
+        providerRefreshTimeout: Duration = AccountsController.defaultProviderRefreshTimeout,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.isDemo = isDemo
         self.providersByID = Dictionary(uniqueKeysWithValues: providers.map { ($0.provider, $0) })
         self.sleeper = sleeper
         self.signInDuration = signInDuration
         self.initialConnectingDuration = initialConnectingDuration
+        self.providerRefreshTimeout = providerRefreshTimeout
+        self.clock = clock
 
         let byID = Dictionary(uniqueKeysWithValues: initialSnapshots.map { ($0.provider, $0) })
         self._snapshots = ProviderID.allCases.map { id in
@@ -84,6 +99,14 @@ public final class AccountsController: Observable {
         )
     }
 
+    public func nextAllowedRefreshDate(for provider: ProviderID) -> Date? {
+        backoffUntil[provider]
+    }
+
+    public func consecutiveFailureCount(for provider: ProviderID) -> Int {
+        consecutiveFailures[provider] ?? 0
+    }
+
     /// Starts sign-in (or reconnect) for `provider`.
     /// - Valid entry states: `.notConnected`, `.expired`, `.unsupported`.
     /// - Transitions immediately to `.connecting` ("Finish signing in in your browser").
@@ -95,11 +118,13 @@ public final class AccountsController: Observable {
         let current = _snapshots.first(where: { $0.provider == provider })
         let currentState = current?.connectionState ?? .notConnected
 
-        guard currentState == .notConnected || currentState == .expired || currentState == .unsupported else {
+        guard currentState == .notConnected || currentState == .expired || currentState == .unsupported || currentState == .waitingForKeychain else {
             return nil
         }
 
         let generation = beginOperation(for: provider)
+        consecutiveFailures[provider] = nil
+        backoffUntil[provider] = nil
 
         let preservedPlan = current?.plan ?? ""
         let retainMenuBarSlot = (currentState == .expired)
@@ -131,6 +156,8 @@ public final class AccountsController: Observable {
         }
 
         let generation = beginOperation(for: provider)
+        consecutiveFailures[provider] = nil
+        backoffUntil[provider] = nil
 
         let signedOutSnapshot = ProviderSnapshot(
             provider: provider,
@@ -161,7 +188,7 @@ public final class AccountsController: Observable {
                 switch existing.connectionState {
                 case .connected:
                     return DemoFixtures.snapshot(for: existing.provider, scenario: .all)
-                case .expired, .notConnected, .connecting, .unsupported:
+                case .expired, .notConnected, .connecting, .unsupported, .waitingForKeychain:
                     return existing
                 }
             }
@@ -171,6 +198,7 @@ public final class AccountsController: Observable {
             return
         }
 
+        let now = clock()
         let currentByID = Dictionary(uniqueKeysWithValues: _snapshots.map { ($0.provider, $0) })
         var refreshGenerations: [ProviderID: UInt64] = [:]
         var providersToFetch: [any UsageProvider] = []
@@ -179,11 +207,18 @@ public final class AccountsController: Observable {
             guard inFlightOperations[id] == nil else {
                 continue
             }
-            if let state = currentByID[id]?.connectionState,
-               state == .connecting || state == .unsupported {
+            guard let provider = providersByID[id] else {
                 continue
             }
-            guard let provider = providersByID[id] else {
+            if let state = currentByID[id]?.connectionState {
+                if state == .connecting {
+                    continue
+                }
+                if state == .unsupported && provider is UnconfiguredUsageProvider {
+                    continue
+                }
+            }
+            if let nextAllowed = backoffUntil[id], now < nextAllowed {
                 continue
             }
             refreshGenerations[id] = advanceGeneration(for: id)
@@ -192,32 +227,181 @@ public final class AccountsController: Observable {
 
         guard !providersToFetch.isEmpty else { return }
 
-        var fetched: [ProviderID: ProviderSnapshot] = [:]
-        await withTaskGroup(of: ProviderSnapshot?.self) { group in
+        let timeout = self.providerRefreshTimeout
+        let clockFn = self.clock
+
+        await withTaskGroup(of: (ProviderID, SingleFetchOutcome).self) { group in
             for provider in providersToFetch {
                 group.addTask {
-                    try? await provider.fetchSnapshot()
+                    let outcome = await Self.fetchBounded(
+                        provider: provider,
+                        timeout: timeout,
+                        clock: clockFn
+                    )
+                    return (provider.provider, outcome)
                 }
             }
-            for await snapshot in group {
-                if let snapshot {
-                    fetched[snapshot.provider] = snapshot
+
+            // Publish each provider immediately as it completes so one slow/blocked provider
+            // never delays UI updates for the others.
+            for await (id, outcome) in group {
+                guard let expectedGeneration = refreshGenerations[id],
+                      isCurrentOperation(expectedGeneration, for: id) else {
+                    continue
                 }
+                applyRefreshOutcome(outcome, for: id, completedAt: clock())
+            }
+        }
+    }
+
+    private func applyRefreshOutcome(
+        _ outcome: SingleFetchOutcome,
+        for id: ProviderID,
+        completedAt: Date
+    ) {
+        let existing = _snapshots.first(where: { $0.provider == id })
+        switch outcome {
+        case .success(let fresh):
+            consecutiveFailures[id] = nil
+            backoffUntil[id] = nil
+            replaceSnapshot(fresh)
+
+        case .transientFailure(let diagnosticSnapshot):
+            let failures = (consecutiveFailures[id] ?? 0) + 1
+            consecutiveFailures[id] = failures
+            let delay = ProviderBackoffPolicy.delay(forConsecutiveFailures: failures)
+            backoffUntil[id] = completedAt.addingTimeInterval(delay)
+            // Preserve a previously connected snapshot so a transient failure never blanks loaded limits.
+            // When there is no successful snapshot to preserve, surface the diagnostic failure snapshot.
+            if existing?.connectionState != .connected {
+                let failureSnapshot = diagnosticSnapshot ?? ProviderSnapshot(
+                    provider: id,
+                    plan: existing?.plan ?? "",
+                    connectionState: .unsupported,
+                    limits: [],
+                    connectedVia: "Refresh failed",
+                    updatedAt: completedAt
+                )
+                replaceSnapshot(failureSnapshot)
+            }
+
+        case .cancelled:
+            break
+        }
+    }
+
+    private nonisolated static func fetchBounded(
+        provider: any UsageProvider,
+        timeout: Duration,
+        clock: @escaping @Sendable () -> Date
+    ) async -> SingleFetchOutcome {
+        final class OutcomeGate: @unchecked Sendable {
+            private let lock = NSLock()
+            private var continuation: CheckedContinuation<SingleFetchOutcome, Never>?
+            private var completedOutcome: SingleFetchOutcome?
+            private var fetchTask: Task<Void, Never>?
+            private var timeoutTask: Task<Void, Never>?
+
+            func install(
+                continuation: CheckedContinuation<SingleFetchOutcome, Never>,
+                fetchTask: Task<Void, Never>,
+                timeoutTask: Task<Void, Never>
+            ) {
+                lock.lock()
+                if let outcome = completedOutcome {
+                    lock.unlock()
+                    fetchTask.cancel()
+                    timeoutTask.cancel()
+                    continuation.resume(returning: outcome)
+                    return
+                }
+                self.continuation = continuation
+                self.fetchTask = fetchTask
+                self.timeoutTask = timeoutTask
+                lock.unlock()
+            }
+
+            func finish(with outcome: SingleFetchOutcome) {
+                lock.lock()
+                guard completedOutcome == nil else {
+                    lock.unlock()
+                    return
+                }
+                completedOutcome = outcome
+                let cont = continuation
+                continuation = nil
+                let fTask = fetchTask
+                fetchTask = nil
+                let tTask = timeoutTask
+                timeoutTask = nil
+                lock.unlock()
+
+                fTask?.cancel()
+                tTask?.cancel()
+                cont?.resume(returning: outcome)
             }
         }
 
-        let nextSnapshots = ProviderID.allCases.compactMap { id -> ProviderSnapshot? in
-            let existing = _snapshots.first(where: { $0.provider == id })
-            guard let expectedGeneration = refreshGenerations[id],
-                  isCurrentOperation(expectedGeneration, for: id),
-                  let fresh = fetched[id] else {
-                return existing
-            }
-            return fresh
-        }
+        let gate = OutcomeGate()
+        let providerID = provider.provider
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(returning: .cancelled)
+                    return
+                }
 
-        _$observationRegistrar.withMutation(of: self, keyPath: \.snapshots) {
-            _snapshots = nextSnapshots
+                let fetchTask = Task.detached(priority: .userInitiated) {
+                    if let diagnosable = provider as? any DiagnosableUsageProvider {
+                        let result = await diagnosable.fetchResult()
+                        if Task.isCancelled {
+                            gate.finish(with: .cancelled)
+                        } else if result.diagnostic?.isTransientError == true {
+                            gate.finish(with: .transientFailure(result.snapshot))
+                        } else {
+                            gate.finish(with: .success(result.snapshot))
+                        }
+                        return
+                    }
+                    do {
+                        let snapshot = try await provider.fetchSnapshot()
+                        if Task.isCancelled {
+                            gate.finish(with: .cancelled)
+                        } else {
+                            gate.finish(with: .success(snapshot))
+                        }
+                    } catch is CancellationError {
+                        gate.finish(with: .cancelled)
+                    } catch {
+                        gate.finish(with: .transientFailure(nil))
+                    }
+                }
+
+                let timeoutTask = Task.detached(priority: .utility) {
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
+                    let timeoutSnapshot = ProviderSnapshot(
+                        provider: providerID,
+                        plan: "",
+                        connectionState: .unsupported,
+                        limits: [],
+                        connectedVia: "Request timed out",
+                        updatedAt: clock()
+                    )
+                    gate.finish(with: .transientFailure(timeoutSnapshot))
+                }
+
+                gate.install(
+                    continuation: continuation,
+                    fetchTask: fetchTask,
+                    timeoutTask: timeoutTask
+                )
+            }
+        } onCancel: {
+            gate.finish(with: .cancelled)
         }
     }
 

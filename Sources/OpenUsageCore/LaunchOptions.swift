@@ -16,6 +16,8 @@ public struct LaunchOptions: Sendable, Equatable {
     public let snapshotDir: URL?
     public let printWindowFrames: Bool
     public let dumpTokenSummary: Bool
+    public let dumpLimits: Bool
+    public let dumpLimitsShape: Bool
 
     public init(
         isDemo: Bool = false,
@@ -26,7 +28,9 @@ public struct LaunchOptions: Sendable, Equatable {
         statisticsRange: StatisticsRange = .thirtyDays,
         snapshotDir: URL? = nil,
         printWindowFrames: Bool = false,
-        dumpTokenSummary: Bool = false
+        dumpTokenSummary: Bool = false,
+        dumpLimits: Bool = false,
+        dumpLimitsShape: Bool = false
     ) {
         self.isDemo = isDemo
         self.demoScenario = demoScenario
@@ -43,6 +47,8 @@ public struct LaunchOptions: Sendable, Equatable {
         self.snapshotDir = snapshotDir
         self.printWindowFrames = printWindowFrames
         self.dumpTokenSummary = dumpTokenSummary
+        self.dumpLimits = dumpLimits
+        self.dumpLimitsShape = dumpLimitsShape
     }
 
     public static func parse(
@@ -62,6 +68,8 @@ public struct LaunchOptions: Sendable, Equatable {
         var snapshotDir: URL?
         var printWindowFrames = false
         var dumpTokenSummary = false
+        var dumpLimits = false
+        var dumpLimitsShape = false
 
         func applySelect(_ rawValue: String) {
             if let parsed = StatisticsFilter(cliValue: rawValue) {
@@ -136,6 +144,12 @@ public struct LaunchOptions: Sendable, Equatable {
             } else if arg == "--dump-token-summary" {
                 dumpTokenSummary = true
                 index += 1
+            } else if arg == "--dump-limits" {
+                dumpLimits = true
+                index += 1
+            } else if arg == "--dump-limits-shape" {
+                dumpLimitsShape = true
+                index += 1
             } else {
                 index += 1
             }
@@ -150,7 +164,9 @@ public struct LaunchOptions: Sendable, Equatable {
             statisticsRange: statisticsRange,
             snapshotDir: snapshotDir,
             printWindowFrames: printWindowFrames,
-            dumpTokenSummary: dumpTokenSummary
+            dumpTokenSummary: dumpTokenSummary,
+            dumpLimits: dumpLimits,
+            dumpLimitsShape: dumpLimitsShape
         )
     }
 }

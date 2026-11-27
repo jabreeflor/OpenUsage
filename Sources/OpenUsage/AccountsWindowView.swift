@@ -484,8 +484,10 @@ private struct SubscriptionAccountRow: View {
             return ("Off", Theme.ringTrack.swiftUIColor, Theme.textMuted.swiftUIColor)
         case .connecting:
             return ("Connecting", Theme.ringTrack.swiftUIColor, Theme.textSecondary.swiftUIColor)
+        case .waitingForKeychain:
+            return ("Waiting for Keychain access", Theme.ringTrack.swiftUIColor, Theme.textMuted.swiftUIColor)
         case .unsupported:
-            return ("Not supported", Theme.ringTrack.swiftUIColor, Theme.textMuted.swiftUIColor)
+            return ("Not yet supported", Theme.ringTrack.swiftUIColor, Theme.textMuted.swiftUIColor)
         }
     }
 
@@ -497,7 +499,8 @@ private struct SubscriptionAccountRow: View {
         case .connected: return "Connected"
         case .expired: return "Sign-in expired"
         case .connecting: return "Finish signing in in your browser"
-        case .unsupported: return "Sign-in is not yet supported"
+        case .waitingForKeychain: return "Waiting for Keychain access"
+        case .unsupported: return "Not yet supported"
         case .notConnected: return "Not connected"
         }
     }
@@ -532,6 +535,8 @@ private struct SubscriptionAccountRow: View {
             Text(pill.label)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(pill.foreground)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.vertical, 3)
                 .padding(.horizontal, 8)
                 .frame(minWidth: 100)
@@ -601,7 +606,7 @@ private struct SubscriptionAccountRow: View {
             .accessibilityLabel("Waiting")
             .accessibilityAddTraits(.isButton)
 
-        case .expired:
+        case .expired, .unsupported, .waitingForKeychain:
             Button(action: onSignIn) {
                 Text("Reconnect")
                     .font(.system(size: 12, weight: .semibold))
@@ -619,7 +624,7 @@ private struct SubscriptionAccountRow: View {
             }
             .buttonStyle(.plain)
 
-        case .notConnected, .unsupported:
+        case .notConnected:
             Button(action: onSignIn) {
                 Text("Sign in")
                     .font(.system(size: 12, weight: .semibold))

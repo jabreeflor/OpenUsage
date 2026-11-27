@@ -194,8 +194,10 @@ private struct ProviderTileView: View {
             return "Not connected"
         case .connecting:
             return "Connecting"
+        case .waitingForKeychain:
+            return "Waiting for Keychain access"
         case .unsupported:
-            return "Not supported"
+            return "Not yet supported"
         }
     }
 
@@ -232,7 +234,7 @@ private struct ProviderTileView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(subtitleColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.72)
             }
             .padding(.top, 12)
             .padding(.bottom, 10)
@@ -594,11 +596,19 @@ private struct ProviderDetailCardView: View {
                 buttonTitle: "Open Accounts",
                 isPrimaryNeutral: false
             )
+        case .waitingForKeychain:
+            return (
+                title: "Waiting for Keychain access",
+                titleColor: Theme.textSecondary.swiftUIColor,
+                detail: "Approve the macOS Keychain prompt to load live usage limits.",
+                buttonTitle: "Open Accounts",
+                isPrimaryNeutral: false
+            )
         case .unsupported, .connected:
             return (
-                title: "Not supported",
+                title: "Not yet supported",
                 titleColor: Theme.textSecondary.swiftUIColor,
-                detail: snapshot.connectedVia.isEmpty ? "Live limits are not yet available for this provider." : snapshot.connectedVia,
+                detail: snapshot.connectedVia.isEmpty ? "Live limits are not yet supported for this provider." : snapshot.connectedVia,
                 buttonTitle: "Open Accounts",
                 isPrimaryNeutral: false
             )

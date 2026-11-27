@@ -1,6 +1,21 @@
+import AppKit
 import Foundation
 import Observation
 import OpenUsageCore
+
+struct WorkspaceURLOpener: URLOpening, Sendable {
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        if Thread.isMainThread {
+            return MainActor.assumeIsolated {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        return DispatchQueue.main.sync {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
 
 enum DropdownSelection: Equatable, Hashable, Sendable {
     case provider(ProviderID)
@@ -135,10 +150,12 @@ final class AppStore: Observable {
         let resolvedProviders: [any UsageProvider]
         if let providers {
             resolvedProviders = providers
-        } else if options.isDemo {
-            resolvedProviders = DemoFixtures.providers(for: options.demoScenario)
         } else {
-            resolvedProviders = ProviderID.allCases.map { UnconfiguredUsageProvider(provider: $0) }
+            resolvedProviders = UsageProviderRegistry.makeProviders(
+                isDemo: options.isDemo,
+                demoScenario: options.demoScenario,
+                urlOpener: WorkspaceURLOpener()
+            )
         }
 
         let initialSnapshots: [ProviderSnapshot]
@@ -198,21 +215,13 @@ final class AppStore: Observable {
     }
 
     private func hasRealLimitData(for filter: StatisticsFilter) -> Bool {
-        if options.isDemo {
-            return true
-        }
-        let targetProviders: [ProviderID] = switch filter {
-        case .overview: ProviderID.allCases
-        case .provider(let id): [id]
-        }
-        let targetSet = Set(targetProviders)
-        if snapshots.contains(where: { targetSet.contains($0.provider) && $0.connectionState == .connected && !$0.limits.isEmpty }) {
-            return true
-        }
-        if limitHitEvents.contains(where: { targetSet.contains($0.provider) }) {
-            return true
-        }
-        return false
+        // Live provider snapshots only represent current utilization, not historical 7D/30D coverage.
+        // Keep the "Limits hit" KPI unavailable until historical coverage exists for the selected range.
+        StatisticsLimitHitPolicy.isAvailable(
+            isDemo: options.isDemo,
+            historicalCoverageDays: 0,
+            range: statisticsRange
+        )
     }
 
     func updatedAgoText(now: Date = Date()) -> String {

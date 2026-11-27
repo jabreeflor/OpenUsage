@@ -20,20 +20,48 @@ enum OpenUsageMain {
             }
         }
 
-        if options.dumpTokenSummary {
+        if options.dumpTokenSummary || options.dumpLimits || options.dumpLimitsShape {
             let semaphore = DispatchSemaphore(value: 0)
-            let isDemo = options.isDemo
+            let capturedOptions = options
+            let exitCodeBox = ExitCodeBox()
             Task.detached(priority: .userInitiated) {
-                let report = await TokenSummaryDumper.generateReport(isDemo: isDemo)
-                fputs(report, stdout)
-                fflush(stdout)
+                if let result = await CLIDumpDispatcher.run(
+                    options: capturedOptions,
+                    stderrWriter: { line in
+                        fputs(line, stderr)
+                        fflush(stderr)
+                    }
+                ) {
+                    if !result.stdout.isEmpty {
+                        fputs(result.stdout, stdout)
+                        fflush(stdout)
+                    }
+                    exitCodeBox.set(result.exitCode)
+                }
                 semaphore.signal()
             }
             semaphore.wait()
-            Darwin.exit(0)
+            Darwin.exit(exitCodeBox.get())
         }
 
         OpenUsageApp.main()
+    }
+}
+
+private final class ExitCodeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var code: Int32 = 0
+
+    func set(_ newValue: Int32) {
+        lock.lock()
+        code = newValue
+        lock.unlock()
+    }
+
+    func get() -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        return code
     }
 }
 

@@ -5,6 +5,7 @@ public enum ConnectionState: String, Codable, Sendable, Equatable, Hashable {
     case expired
     case notConnected
     case connecting
+    case waitingForKeychain
     case unsupported
 }
 
@@ -63,7 +64,7 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
             return .dimmedPlaceholder
         case .connecting:
             return showMenuBarPlaceholderWhileConnecting ? .dimmedPlaceholder : .omitted
-        case .notConnected, .unsupported:
+        case .notConnected, .unsupported, .waitingForKeychain:
             return .omitted
         }
     }

@@ -11,6 +11,8 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertNil(options.snapshotDir)
         XCTAssertFalse(options.printWindowFrames)
         XCTAssertFalse(options.dumpTokenSummary)
+        XCTAssertFalse(options.dumpLimits)
+        XCTAssertFalse(options.dumpLimitsShape)
     }
 
     func testDemoFlagAndEnvironmentVariable() {
@@ -77,6 +79,8 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertNil(options.snapshotDir)
         XCTAssertFalse(options.printWindowFrames)
         XCTAssertFalse(options.dumpTokenSummary)
+        XCTAssertFalse(options.dumpLimits)
+        XCTAssertFalse(options.dumpLimitsShape)
     }
 
     func testSelectProviderFlag() {
@@ -155,5 +159,34 @@ final class LaunchOptionsTests: XCTestCase {
         )
         XCTAssertTrue(demoDump.isDemo)
         XCTAssertTrue(demoDump.dumpTokenSummary)
+        XCTAssertFalse(demoDump.dumpLimits)
+    }
+
+    func testDumpLimitsFlag() {
+        let liveDump = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--dump-limits"],
+            environment: [:]
+        )
+        XCTAssertFalse(liveDump.isDemo)
+        XCTAssertTrue(liveDump.dumpLimits)
+
+        let demoDump = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--demo", "--demo-scenario", "disconnected", "--dump-limits"],
+            environment: [:]
+        )
+        XCTAssertTrue(demoDump.isDemo)
+        XCTAssertEqual(demoDump.demoScenario, .disconnected)
+        XCTAssertTrue(demoDump.dumpLimits)
+        XCTAssertFalse(demoDump.dumpLimitsShape)
+    }
+
+    func testDumpLimitsShapeFlag() {
+        let shapeDump = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--dump-limits-shape"],
+            environment: [:]
+        )
+        XCTAssertFalse(shapeDump.isDemo)
+        XCTAssertFalse(shapeDump.dumpLimits)
+        XCTAssertTrue(shapeDump.dumpLimitsShape)
     }
 }

@@ -222,7 +222,8 @@ struct StatisticsContentView: View {
                 switch snap.connectionState {
                 case .expired: fallbackLabel = "\(provider.displayName) \u{00B7} Expired"
                 case .connecting: fallbackLabel = "\(provider.displayName) \u{00B7} Connecting"
-                case .unsupported: fallbackLabel = "\(provider.displayName) \u{00B7} Unsupported"
+                case .waitingForKeychain: fallbackLabel = "\(provider.displayName) \u{00B7} Waiting for Keychain access"
+                case .unsupported: fallbackLabel = "\(provider.displayName) \u{00B7} Not yet supported"
                 case .notConnected, .connected: fallbackLabel = "\(provider.displayName) \u{00B7} Off"
                 }
                 return StatsGaugeItem(
@@ -249,7 +250,8 @@ struct StatisticsContentView: View {
             switch snap.connectionState {
             case .expired: statusLabel = "Sign-in expired"
             case .connecting: statusLabel = "Connecting"
-            case .unsupported: statusLabel = "Not supported"
+            case .waitingForKeychain: statusLabel = "Waiting for Keychain access"
+            case .unsupported: statusLabel = "Not yet supported"
             case .notConnected, .connected: statusLabel = "Not connected"
             }
             return [
