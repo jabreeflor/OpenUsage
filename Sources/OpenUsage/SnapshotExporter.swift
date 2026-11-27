@@ -13,6 +13,7 @@ enum SnapshotExporter {
 
         try exportMenuBarSnapshots(to: directory)
         try exportDropdownSnapshots(to: directory)
+        try exportStatisticsSnapshots(to: directory)
     }
 
     static func exportMenuBarSnapshots(to directory: URL) throws {
@@ -60,6 +61,38 @@ enum SnapshotExporter {
                 onOpenStatistics: {},
                 onOpenAccounts: { _ in },
                 onQuit: {}
+            )
+            let outputURL = directory.appendingPathComponent(target.filename)
+            try writeSwiftUIViewPNG(view, to: outputURL, scale: 2.0)
+        }
+    }
+
+    static func exportStatisticsSnapshots(to directory: URL) throws {
+        let targets: [(range: StatisticsRange, filter: StatisticsFilter, filename: String)] = [
+            (.thirtyDays, .overview, "statistics-overview-30d.png"),
+            (.sevenDays, .provider(.claude), "statistics-claude-7d.png")
+        ]
+
+        let snapshots = DemoFixtures.snapshots(for: .all)
+        let buckets = DemoFixtures.tokenBuckets()
+        let limitHits = DemoFixtures.limitHitEvents()
+
+        for target in targets {
+            let summary = StatisticsAggregator.summarize(
+                buckets: buckets,
+                limitHits: limitHits,
+                range: target.range,
+                filter: target.filter,
+                anchorDate: DemoFixtures.referenceDate
+            )
+            let view = StatisticsContentView(
+                snapshots: snapshots,
+                summary: summary,
+                yellowFrom: DepletionColor.defaultYellowThreshold,
+                redFrom: DepletionColor.defaultRedThreshold,
+                showsSimulatedTrafficLights: true,
+                onSelectRange: { _ in },
+                onSelectFilter: { _ in }
             )
             let outputURL = directory.appendingPathComponent(target.filename)
             try writeSwiftUIViewPNG(view, to: outputURL, scale: 2.0)

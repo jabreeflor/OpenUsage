@@ -23,4 +23,16 @@ public struct UsageLimit: Identifiable, Codable, Sendable, Equatable, Hashable {
         self.resetText = resetText
         self.resetsAt = resetsAt
     }
+
+    /// Compact label used on Statistics ring cards (`5-hour`, `Weekly`, `Weekly · Opus`).
+    public var statsLabel: String {
+        switch name {
+        case "5-hour session":
+            return "5-hour"
+        case "Weekly · all models":
+            return "Weekly"
+        default:
+            return name
+        }
+    }
 }

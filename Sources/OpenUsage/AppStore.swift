@@ -16,8 +16,12 @@ final class AppStore: Observable {
     private let providers: [any UsageProvider]
 
     private var _snapshots: [ProviderSnapshot]
+    private var _tokenBuckets: [TokenBucket]
+    private var _limitHitEvents: [LimitHitEvent]
     private var _todayUsage: TodayUsageSummary
     private var _selectedTile: DropdownSelection
+    private var _statisticsRange: StatisticsRange
+    private var _statisticsFilter: StatisticsFilter
     private var _isRefreshing: Bool = false
     private var _isDropdownOpen: Bool = false
     private var _lastRefreshedAt: Date?
@@ -27,6 +31,16 @@ final class AppStore: Observable {
     var snapshots: [ProviderSnapshot] {
         _$observationRegistrar.access(self, keyPath: \.snapshots)
         return _snapshots
+    }
+
+    var tokenBuckets: [TokenBucket] {
+        _$observationRegistrar.access(self, keyPath: \.tokenBuckets)
+        return _tokenBuckets
+    }
+
+    var limitHitEvents: [LimitHitEvent] {
+        _$observationRegistrar.access(self, keyPath: \.limitHitEvents)
+        return _limitHitEvents
     }
 
     var todayUsage: TodayUsageSummary {
@@ -42,6 +56,30 @@ final class AppStore: Observable {
         set {
             _$observationRegistrar.withMutation(of: self, keyPath: \.selectedTile) {
                 _selectedTile = newValue
+            }
+        }
+    }
+
+    var statisticsRange: StatisticsRange {
+        get {
+            _$observationRegistrar.access(self, keyPath: \.statisticsRange)
+            return _statisticsRange
+        }
+        set {
+            _$observationRegistrar.withMutation(of: self, keyPath: \.statisticsRange) {
+                _statisticsRange = newValue
+            }
+        }
+    }
+
+    var statisticsFilter: StatisticsFilter {
+        get {
+            _$observationRegistrar.access(self, keyPath: \.statisticsFilter)
+            return _statisticsFilter
+        }
+        set {
+            _$observationRegistrar.withMutation(of: self, keyPath: \.statisticsFilter) {
+                _statisticsFilter = newValue
             }
         }
     }
@@ -69,6 +107,8 @@ final class AppStore: Observable {
         self.options = options
         self.thresholds = thresholds ?? ThresholdSettings.forLaunch(isDemo: options.isDemo)
         self._selectedTile = .provider(options.selectedProvider ?? .claude)
+        self._statisticsRange = options.statisticsRange
+        self._statisticsFilter = options.statisticsFilter
 
         if let providers {
             self.providers = providers
@@ -79,7 +119,10 @@ final class AppStore: Observable {
         }
 
         if options.isDemo {
+            let buckets = DemoFixtures.tokenBuckets()
             self._snapshots = DemoFixtures.snapshots(for: options.demoScenario)
+            self._tokenBuckets = buckets
+            self._limitHitEvents = DemoFixtures.limitHitEvents()
             self._todayUsage = DemoFixtures.todayUsage()
             self._lastRefreshedAt = DemoFixtures.referenceDate
         } else {
@@ -92,15 +135,29 @@ final class AppStore: Observable {
                     connectedVia: "Not connected"
                 )
             }
+            self._tokenBuckets = []
+            self._limitHitEvents = []
             self._todayUsage = .empty
             self._lastRefreshedAt = nil
         }
+
         self.refreshScheduler = RefreshScheduler(
             lastRefreshDate: options.isDemo ? Date() : nil,
             isDropdownOpen: false,
             onRefresh: { [weak self] in
                 await self?.refresh()
             }
+        )
+    }
+
+    func statisticsSummary(now: Date = Date()) -> StatisticsSummary {
+        let anchorDate = options.isDemo ? DemoFixtures.referenceDate : now
+        return StatisticsAggregator.summarize(
+            buckets: tokenBuckets,
+            limitHits: limitHitEvents,
+            range: statisticsRange,
+            filter: statisticsFilter,
+            anchorDate: anchorDate
         )
     }
 

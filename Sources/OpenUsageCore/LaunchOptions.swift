@@ -11,20 +11,35 @@ public struct LaunchOptions: Sendable, Equatable {
     public let demoScenario: DemoScenario
     public let openScreen: InitialScreen?
     public let selectedProvider: ProviderID?
+    public let statisticsFilter: StatisticsFilter
+    public let statisticsRange: StatisticsRange
     public let snapshotDir: URL?
+    public let printWindowFrames: Bool
 
     public init(
         isDemo: Bool = false,
         demoScenario: DemoScenario = .all,
         openScreen: InitialScreen? = nil,
         selectedProvider: ProviderID? = nil,
-        snapshotDir: URL? = nil
+        statisticsFilter: StatisticsFilter? = nil,
+        statisticsRange: StatisticsRange = .thirtyDays,
+        snapshotDir: URL? = nil,
+        printWindowFrames: Bool = false
     ) {
         self.isDemo = isDemo
         self.demoScenario = demoScenario
         self.openScreen = openScreen
         self.selectedProvider = selectedProvider
+        if let statisticsFilter {
+            self.statisticsFilter = statisticsFilter
+        } else if let selectedProvider {
+            self.statisticsFilter = .provider(selectedProvider)
+        } else {
+            self.statisticsFilter = .overview
+        }
+        self.statisticsRange = statisticsRange
         self.snapshotDir = snapshotDir
+        self.printWindowFrames = printWindowFrames
     }
 
     public static func parse(
@@ -39,7 +54,23 @@ public struct LaunchOptions: Sendable, Equatable {
         var demoScenario: DemoScenario = .all
         var openScreen: InitialScreen?
         var selectedProvider: ProviderID?
+        var statisticsFilter: StatisticsFilter = .overview
+        var statisticsRange: StatisticsRange = .thirtyDays
         var snapshotDir: URL?
+        var printWindowFrames = false
+
+        func applySelect(_ rawValue: String) {
+            if let parsed = StatisticsFilter(cliValue: rawValue) {
+                statisticsFilter = parsed
+                selectedProvider = parsed.providerID
+            }
+        }
+
+        func applyRange(_ rawValue: String) {
+            if let parsed = StatisticsRange(rawValue: rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+                statisticsRange = parsed
+            }
+        }
 
         var index = 1
         while index < arguments.count {
@@ -70,15 +101,18 @@ public struct LaunchOptions: Sendable, Equatable {
                 }
                 index += 1
             } else if arg == "--select", index + 1 < arguments.count {
-                if let parsed = ProviderID(rawValue: arguments[index + 1].lowercased()) {
-                    selectedProvider = parsed
-                }
+                applySelect(arguments[index + 1])
                 index += 2
             } else if arg.hasPrefix("--select=") {
-                let value = String(arg.dropFirst("--select=".count)).lowercased()
-                if let parsed = ProviderID(rawValue: value) {
-                    selectedProvider = parsed
-                }
+                let value = String(arg.dropFirst("--select=".count))
+                applySelect(value)
+                index += 1
+            } else if arg == "--range", index + 1 < arguments.count {
+                applyRange(arguments[index + 1])
+                index += 2
+            } else if arg.hasPrefix("--range=") {
+                let value = String(arg.dropFirst("--range=".count))
+                applyRange(value)
                 index += 1
             } else if arg == "--snapshot-dir", index + 1 < arguments.count {
                 let path = arguments[index + 1]
@@ -92,6 +126,9 @@ public struct LaunchOptions: Sendable, Equatable {
                     snapshotDir = URL(fileURLWithPath: path, isDirectory: true)
                 }
                 index += 1
+            } else if arg == "--print-window-frames" {
+                printWindowFrames = true
+                index += 1
             } else {
                 index += 1
             }
@@ -102,7 +139,10 @@ public struct LaunchOptions: Sendable, Equatable {
             demoScenario: demoScenario,
             openScreen: openScreen,
             selectedProvider: selectedProvider,
-            snapshotDir: snapshotDir
+            statisticsFilter: statisticsFilter,
+            statisticsRange: statisticsRange,
+            snapshotDir: snapshotDir,
+            printWindowFrames: printWindowFrames
         )
     }
 }

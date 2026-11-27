@@ -45,6 +45,35 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
         case nil:
             break
         }
+
+        if store.options.printWindowFrames {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                Self.printWindowFramesToStdout()
+            }
+        }
+    }
+
+    private static func printWindowFramesToStdout() {
+        for window in NSApplication.shared.windows {
+            let frame = window.frame
+            let content = window.contentRect(forFrameRect: frame)
+            let className = String(describing: type(of: window))
+            let title = window.title.isEmpty ? "(untitled)" : window.title
+            let line = String(
+                format: "WINDOW title=\"%@\" class=%@ visible=%@ frame=%.0f,%.0f %.0fx%.0f content=%.0fx%.0f\n",
+                title,
+                className,
+                window.isVisible ? "true" : "false",
+                frame.origin.x,
+                frame.origin.y,
+                frame.size.width,
+                frame.size.height,
+                content.size.width,
+                content.size.height
+            )
+            fputs(line, stdout)
+        }
+        fflush(stdout)
     }
 }
 

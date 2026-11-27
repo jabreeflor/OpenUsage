@@ -9,6 +9,7 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertNil(options.openScreen)
         XCTAssertNil(options.selectedProvider)
         XCTAssertNil(options.snapshotDir)
+        XCTAssertFalse(options.printWindowFrames)
     }
 
     func testDemoFlagAndEnvironmentVariable() {
@@ -73,6 +74,7 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertEqual(options.openScreen, .dropdown)
         XCTAssertNil(options.selectedProvider)
         XCTAssertNil(options.snapshotDir)
+        XCTAssertFalse(options.printWindowFrames)
     }
 
     func testSelectProviderFlag() {
@@ -94,5 +96,45 @@ final class LaunchOptionsTests: XCTestCase {
             environment: [:]
         )
         XCTAssertNil(invalid.selectedProvider)
+        XCTAssertEqual(invalid.statisticsFilter, .overview)
+    }
+
+    func testStatisticsRangeAndSelectOverviewFlags() {
+        let defaults = LaunchOptions.parse(arguments: ["OpenUsage"], environment: [:])
+        XCTAssertEqual(defaults.statisticsRange, .thirtyDays)
+        XCTAssertEqual(defaults.statisticsFilter, .overview)
+
+        let claude7d = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--open", "statistics", "--select", "claude", "--range", "7d"],
+            environment: [:]
+        )
+        XCTAssertEqual(claude7d.openScreen, .statistics)
+        XCTAssertEqual(claude7d.selectedProvider, .claude)
+        XCTAssertEqual(claude7d.statisticsFilter, .provider(.claude))
+        XCTAssertEqual(claude7d.statisticsRange, .sevenDays)
+
+        let overview30d = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--select=claude", "--select=overview", "--range=30D"],
+            environment: [:]
+        )
+        XCTAssertNil(overview30d.selectedProvider)
+        XCTAssertEqual(overview30d.statisticsFilter, .overview)
+        XCTAssertEqual(overview30d.statisticsRange, .thirtyDays)
+
+        let invalidRange = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--range", "90d"],
+            environment: [:]
+        )
+        XCTAssertEqual(invalidRange.statisticsRange, .thirtyDays)
+    }
+
+    func testPrintWindowFramesFlag() {
+        let parsed = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--demo", "--open", "statistics", "--print-window-frames"],
+            environment: [:]
+        )
+        XCTAssertTrue(parsed.isDemo)
+        XCTAssertEqual(parsed.openScreen, .statistics)
+        XCTAssertTrue(parsed.printWindowFrames)
     }
 }
