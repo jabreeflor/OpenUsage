@@ -9,6 +9,7 @@ design/demo/*.log
 .build/
 build/
 DerivedData/
+*.xcodeproj/
 *.xcodeproj/xcuserdata/
 .DS_Store
 evidence/
