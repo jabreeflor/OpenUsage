@@ -10,17 +10,20 @@ public struct LaunchOptions: Sendable, Equatable {
     public let isDemo: Bool
     public let demoScenario: DemoScenario
     public let openScreen: InitialScreen?
+    public let selectedProvider: ProviderID?
     public let snapshotDir: URL?
 
     public init(
         isDemo: Bool = false,
         demoScenario: DemoScenario = .all,
         openScreen: InitialScreen? = nil,
+        selectedProvider: ProviderID? = nil,
         snapshotDir: URL? = nil
     ) {
         self.isDemo = isDemo
         self.demoScenario = demoScenario
         self.openScreen = openScreen
+        self.selectedProvider = selectedProvider
         self.snapshotDir = snapshotDir
     }
 
@@ -35,6 +38,7 @@ public struct LaunchOptions: Sendable, Equatable {
 
         var demoScenario: DemoScenario = .all
         var openScreen: InitialScreen?
+        var selectedProvider: ProviderID?
         var snapshotDir: URL?
 
         var index = 1
@@ -65,6 +69,17 @@ public struct LaunchOptions: Sendable, Equatable {
                     openScreen = parsed
                 }
                 index += 1
+            } else if arg == "--select", index + 1 < arguments.count {
+                if let parsed = ProviderID(rawValue: arguments[index + 1].lowercased()) {
+                    selectedProvider = parsed
+                }
+                index += 2
+            } else if arg.hasPrefix("--select=") {
+                let value = String(arg.dropFirst("--select=".count)).lowercased()
+                if let parsed = ProviderID(rawValue: value) {
+                    selectedProvider = parsed
+                }
+                index += 1
             } else if arg == "--snapshot-dir", index + 1 < arguments.count {
                 let path = arguments[index + 1]
                 if !path.isEmpty {
@@ -86,6 +101,7 @@ public struct LaunchOptions: Sendable, Equatable {
             isDemo: isDemo,
             demoScenario: demoScenario,
             openScreen: openScreen,
+            selectedProvider: selectedProvider,
             snapshotDir: snapshotDir
         )
     }

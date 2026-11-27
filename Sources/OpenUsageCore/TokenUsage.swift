@@ -76,3 +76,73 @@ public protocol TokenLogSource: Sendable {
     var provider: ProviderID { get }
     func loadBuckets() async throws -> [TokenBucket]
 }
+
+public struct ModelShare: Identifiable, Codable, Sendable, Equatable, Hashable {
+    public var id: String { model }
+
+    public let model: String
+    public let sharePercent: Int
+    public let tokens: Int
+
+    public init(model: String, sharePercent: Int, tokens: Int) {
+        self.model = model
+        self.sharePercent = min(100, max(0, sharePercent))
+        self.tokens = max(0, tokens)
+    }
+}
+
+public struct ProviderTodayUsage: Identifiable, Codable, Sendable, Equatable {
+    public var id: ProviderID { provider }
+
+    public let provider: ProviderID
+    public let totalTokens: Int
+    public let requests: Int
+    public let models: [ModelShare]
+
+    public init(
+        provider: ProviderID,
+        totalTokens: Int,
+        requests: Int,
+        models: [ModelShare]
+    ) {
+        self.provider = provider
+        self.totalTokens = max(0, totalTokens)
+        self.requests = max(0, requests)
+        self.models = models
+    }
+}
+
+public struct TodayUsageSummary: Codable, Sendable, Equatable {
+    public let totalTokens: Int
+    public let totalRequests: Int
+    public let hourlySparkline: [Int]
+    public let byProvider: [ProviderID: ProviderTodayUsage]
+
+    public static let empty = TodayUsageSummary(
+        totalTokens: 0,
+        totalRequests: 0,
+        hourlySparkline: Array(repeating: 0, count: 12),
+        byProvider: [:]
+    )
+
+    public init(
+        totalTokens: Int,
+        totalRequests: Int,
+        hourlySparkline: [Int],
+        byProvider: [ProviderID: ProviderTodayUsage]
+    ) {
+        self.totalTokens = max(0, totalTokens)
+        self.totalRequests = max(0, totalRequests)
+        self.hourlySparkline = hourlySparkline.map { max(0, $0) }
+        self.byProvider = byProvider
+    }
+
+    public func usage(for provider: ProviderID) -> ProviderTodayUsage {
+        byProvider[provider] ?? ProviderTodayUsage(
+            provider: provider,
+            totalTokens: 0,
+            requests: 0,
+            models: []
+        )
+    }
+}

@@ -7,6 +7,7 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertFalse(options.isDemo)
         XCTAssertEqual(options.demoScenario, .all)
         XCTAssertNil(options.openScreen)
+        XCTAssertNil(options.selectedProvider)
         XCTAssertNil(options.snapshotDir)
     }
 
@@ -70,6 +71,28 @@ final class LaunchOptionsTests: XCTestCase {
         XCTAssertFalse(options.isDemo)
         XCTAssertEqual(options.demoScenario, .all)
         XCTAssertEqual(options.openScreen, .dropdown)
+        XCTAssertNil(options.selectedProvider)
         XCTAssertNil(options.snapshotDir)
+    }
+
+    func testSelectProviderFlag() {
+        let spaceSyntax = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--open", "dropdown", "--select", "cursor"],
+            environment: [:]
+        )
+        XCTAssertEqual(spaceSyntax.openScreen, .dropdown)
+        XCTAssertEqual(spaceSyntax.selectedProvider, .cursor)
+
+        let equalsSyntax = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--select=OpenCode"],
+            environment: [:]
+        )
+        XCTAssertEqual(equalsSyntax.selectedProvider, .opencode)
+
+        let invalid = LaunchOptions.parse(
+            arguments: ["OpenUsage", "--select", "unknown"],
+            environment: [:]
+        )
+        XCTAssertNil(invalid.selectedProvider)
     }
 }

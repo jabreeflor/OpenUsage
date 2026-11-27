@@ -24,10 +24,26 @@ enum Theme {
     static let cardBackground = SRGBColor(hex: "#1F2228")
     static let selectedBackground = SRGBColor(hex: "#262A32")
     static let border = SRGBColor(hex: "#30343C")
+    static let selectedBorder = SRGBColor(hex: "#52525B")
+    static let dashedBorder = SRGBColor(hex: "#3F434C")
+    static let ringTrack = SRGBColor(hex: "#2A2E36")
+    static let barTrack = SRGBColor(hex: "#2A2E36")
+    static let sparklineBar = SRGBColor(hex: "#52525B")
+    static let dimmedIcon = SRGBColor(hex: "#71717A")
     static let textPrimary = SRGBColor(hex: "#F3F4F6")
     static let textSecondary = SRGBColor(hex: "#D4D4D8")
     static let textMuted = SRGBColor(hex: "#A1A1AA")
+    static let linkColor = SRGBColor(hex: "#93C5FD")
+    static let linkHoverColor = SRGBColor(hex: "#BFDBFE")
+    static let neutralButtonFill = SRGBColor(hex: "#F4F4F5")
+    static let neutralButtonText = SRGBColor(hex: "#17191E")
     static let menuBarBackground = SRGBColor(hex: "#1D2026")
+    static let modelShades: [SRGBColor] = [
+        SRGBColor(hex: "#E4E4E7"),
+        SRGBColor(hex: "#A1A1AA"),
+        SRGBColor(hex: "#52525B"),
+        SRGBColor(hex: "#3F3F46")
+    ]
 
     private static let fontRegistrationLock = NSLock()
     private nonisolated(unsafe) static var didRegisterFonts = false
