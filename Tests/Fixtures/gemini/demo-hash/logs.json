@@ -1,0 +1,9 @@
+[
+  {
+    "sessionId": "33333333-0000-4000-8000-000000000001",
+    "messageId": 0,
+    "type": "user",
+    "message": "Synthetic prompt log without tokens",
+    "timestamp": "2026-11-26T16:00:00.000Z"
+  }
+]

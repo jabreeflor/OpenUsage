@@ -1,0 +1,7 @@
+{
+  "cloudaicompanionProject": "fixture-demo-project",
+  "currentTier": {
+    "id": "standard-tier",
+    "name": "Google AI Pro"
+  }
+}

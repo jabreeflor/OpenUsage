@@ -1,0 +1,102 @@
+name: OpenUsage
+options:
+  bundleIdPrefix: dev.jabree
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "26.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  OpenUsageCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/OpenUsageCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jabree.OpenUsageCore
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INSTALL_PATH: "@rpath"
+        DYLIB_INSTALL_NAME_BASE: "@rpath"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+          - "@loader_path/Frameworks"
+
+  OpenUsage:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/OpenUsage
+      - path: Resources/Fonts
+        buildPhase: resources
+        type: folder
+    dependencies:
+      - target: OpenUsageCore
+        embed: true
+    info:
+      path: Sources/OpenUsage/Info.plist
+      properties:
+        ATSApplicationFontsPath: Fonts
+        CFBundleDisplayName: OpenUsage
+        CFBundleIdentifier: dev.jabree.OpenUsage
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        LSUIElement: true
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jabree.OpenUsage
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+
+  OpenUsageCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/OpenUsageCoreTests
+    resources:
+      - path: Tests/Fixtures
+        buildPhase: resources
+        type: folder
+    dependencies:
+      - target: OpenUsageCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jabree.OpenUsageCoreTests
+        GENERATE_INFOPLIST_FILE: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@loader_path/../Frameworks"
+
+schemes:
+  OpenUsage:
+    build:
+      targets:
+        OpenUsage: all
+        OpenUsageCore: all
+        OpenUsageCoreTests: [test]
+    test:
+      targets:
+        - OpenUsageCoreTests
+  OpenUsageCoreTests:
+    build:
+      targets:
+        OpenUsageCore: all
+        OpenUsageCoreTests: [test]
+    test:
+      targets:
+        - OpenUsageCoreTests
