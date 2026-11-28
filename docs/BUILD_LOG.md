@@ -1,5 +1,18 @@
 # Build log
 
+## Homebrew packaging — 2026-11-28
+
+Added a universal Release packaging script, a manual GitHub Actions artifact
+workflow, and Homebrew publishing instructions. Local verification: arm64 and
+x86_64 app/framework slices, strict signature verification before and after ZIP
+extraction, demo Accounts launch, and 151 core tests passing. Astra's static
+packaging review passed; its requested Actions ZIP extraction instructions were
+added. The hosted workflow and installation from a published tap have not run.
+The initial package is ad-hoc signed; Developer ID signing/notarization and
+publication of the release/tap remain separate release steps.
+
+## Original application build
+
 Implementer: `agy --model gemini-4-neon-high` (id confirmed with `agy models`). Reviewer: `codex exec -m gpt-6.2-astra`.
 
 | Milestone | Rounds | Verdict | Open issues |

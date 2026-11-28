@@ -26,6 +26,13 @@ Subscription limits and token history come from separate sources. Token totals r
 
 Claude weekly limits, Codex weekly limits, and Cursor included usage were verified during development. See the [build log](docs/BUILD_LOG.md) for verification details and remaining issues. Provider APIs and local file formats can change.
 
+## Homebrew packaging
+
+Homebrew release packaging is available via `./scripts/package-release.sh 0.1.0`
+or the **Package release** GitHub Actions workflow. It produces a universal Mac
+app ZIP, checksum, and matching cask. Installation through Homebrew requires
+publishing the release and cask first; see [Homebrew distribution](docs/HOMEBREW.md).
+
 ## Build and run
 
 You need macOS 14+, Xcode with Swift 6 support, and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The project was developed with Xcode 26.6.0. Install XcodeGen with Homebrew if needed:
