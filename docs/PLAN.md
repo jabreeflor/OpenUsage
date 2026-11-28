@@ -28,3 +28,10 @@ Orchestrator: Claude Fable 5.2. Implementer: Gemini 4 Neon (`agy --model gemini-
 ## Evidence (after milestone 7)
 
 Screenshots, two recordings and side-by-sides listed in `docs/ORCHESTRATION.md`, all from the real app in demo mode, written to `evidence/` (git-ignored) and attached to the PR with `gh … --attach`.
+
+## Gemini sign-in repair (2026-11-28)
+
+- Replace the unrelated website link with browser OAuth, a loopback callback and PKCE/state validation; keep app-owned credentials in Keychain.
+- Reuse existing Gemini CLI credentials read-only, refresh access tokens, and connect production to the Code Assist quota endpoint.
+- Test callback validation, cancellation/timeouts, refresh, sign-out and provider wiring; build and review with Astra.
+- Verify the actual account flow with the user, preserve demo-only public evidence, and clearly distinguish CLI quotas from Gemini website quotas.

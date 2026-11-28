@@ -606,6 +606,43 @@ private struct SubscriptionAccountRow: View {
             .accessibilityLabel("Waiting")
             .accessibilityAddTraits(.isButton)
 
+        case .unsupported where snapshot.canSignOut:
+            HStack(spacing: 6) {
+                Button(action: onSignOut) {
+                    Text("Sign out")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary.swiftUIColor)
+                        .frame(width: 72, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(Theme.dashedBorder.swiftUIColor, lineWidth: 1)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onSignIn) {
+                    Text("Retry")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.neutralButtonText.swiftUIColor)
+                        .frame(width: 66, height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Theme.neutralButtonFill.swiftUIColor)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .strokeBorder(Theme.neutralButtonFill.swiftUIColor, lineWidth: 1)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
         case .expired, .unsupported, .waitingForKeychain:
             Button(action: onSignIn) {
                 Text("Reconnect")

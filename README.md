@@ -21,7 +21,7 @@ Subscription limits and token history come from separate sources. Token totals r
 | Claude | Anthropic usage endpoint, using the existing Claude Code login in macOS Keychain | Claude Code logs in `~/.claude/projects` |
 | ChatGPT / Codex | Rate-limit events from local Codex CLI sessions, with sign-in checked through `~/.codex/auth.json` | Codex CLI logs in `~/.codex/sessions` |
 | Cursor | Cursor usage endpoint, using the signed-in Cursor app session | No local token-history parser yet |
-| Gemini | Gemini CLI OAuth and Google quota endpoints; not yet verified with a live account | Gemini CLI logs in `~/.gemini/tmp` |
+| Gemini | Gemini Code Assist (Gemini CLI) daily request quota via Google OAuth (`cloudcode-pa.googleapis.com`), separate from `gemini.google.com` web app quota; not yet verified against a live account | Gemini CLI logs in `~/.gemini/tmp` |
 | OpenCode | Local login detection only; live subscription limits are not yet supported | `~/.local/share/opencode/opencode.db` and legacy JSON message files under `storage/message` |
 
 Claude weekly limits, Codex weekly limits, and Cursor included usage were verified during development. See the [build log](docs/BUILD_LOG.md) for verification details and remaining issues. Provider APIs and local file formats can change.
@@ -68,7 +68,7 @@ open build/Products/Debug/OpenUsage.app
 
 OpenUsage runs in the menu bar, without a Dock icon. Click its indicator to open the dropdown, select a provider for its limits, or open **Statistics** and **Accounts**.
 
-For live data, sign in to the corresponding CLI or desktop app first, then use **Sign in** or **Reconnect** in OpenUsage's Accounts window. Existing tool credentials are reused; a browser login alone may not establish the local session OpenUsage needs. Allow macOS Keychain access when prompted for Claude Code credentials. OpenCode token counting is off by default and can be enabled in Accounts.
+For live data, sign in to the corresponding CLI or desktop app first, then use **Sign in** or **Reconnect** in OpenUsage's Accounts window. Existing tool credentials are reused read-only. For Gemini, **Sign in** / **Reconnect** runs a browser Google OAuth flow (PKCE + localhost loopback callback) reusing the installed Gemini CLI's public installed-app OAuth client configuration — so Google's browser consent screen identifies **Gemini CLI** rather than a separately registered OpenUsage app — and stores OpenUsage's resulting tokens in the macOS Keychain. This tracks **Gemini Code Assist / Gemini CLI** quota (`cloudcode-pa.googleapis.com`), which is separate from **Gemini website** (`gemini.google.com`) web app limits. If an authenticated account has unavailable Code Assist quota (for example, missing setup or HTTP 403 permissions), Accounts offers both **Retry** and **Sign out** without looping through browser consent. Allow macOS Keychain access when prompted for Claude Code credentials. OpenCode token counting is off by default and can be enabled in Accounts.
 
 ## Try demo mode
 
@@ -90,7 +90,7 @@ Quit the running instance before switching modes. Demo scenarios are `all`, `con
 
 ## Privacy and data
 
-OpenUsage reads existing tool credentials and session files without modifying those credentials or logs. Claude credentials come from Keychain; other integrations read the relevant tool's existing credential file or local session database. Live Claude, Cursor, and Gemini integrations make authenticated requests to their respective providers.
+OpenUsage reads existing tool credentials and session files without modifying or deleting those credentials or logs. Claude credentials come from Keychain; Gemini reuses `~/.gemini/oauth_creds.json` read-only (refreshing expired CLI tokens in memory only) or stores OpenUsage's own Google OAuth tokens exclusively in the macOS Keychain (`dev.jabree.OpenUsage`), and signing out of Gemini only removes OpenUsage's Keychain item. Other integrations read the relevant tool's existing credential file or local session database. Live Claude, Cursor, and Gemini integrations make authenticated requests to their respective providers.
 
 Token logs are processed locally. Preferences and observed limit-hit history are stored locally, and limit-hit history begins with observations made by OpenUsage. Logs evicted to iCloud may need to download before they appear in totals.
 
@@ -128,6 +128,6 @@ xcodebuild \
 
 - Codex rollout files larger than 16 MiB are skipped, which can leave an older limit reading visible. An undated rate-limit event can also outrank a timestamped event.
 - An iCloud log download completing near its timeout can cause a duplicate read during refresh. Totals remain correct, but the extra read is unnecessary work.
-- Gemini live quota support remains unverified; OpenCode live limits and Cursor token history are incomplete, as noted above.
+- Gemini live quota support is wired to Google OAuth and Gemini Code Assist (`cloudcode-pa.googleapis.com`) matching Gemini CLI, tracks Gemini Code Assist / CLI daily request quota (not `gemini.google.com` consumer web chat quota), requires an installed Gemini CLI for public OAuth client configuration (or existing `~/.gemini/oauth_creds.json`), and remains unverified against a live Google account. OpenCode live limits and Cursor token history are incomplete, as noted above.
 
 See [AGENTS.md](AGENTS.md) for contribution conventions and [docs/SPEC.md](docs/SPEC.md) for the product specification. Keep credentials, real account data, recordings, and GIFs out of Git.

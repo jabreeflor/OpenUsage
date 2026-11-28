@@ -49,11 +49,14 @@ public enum UsageProviderRegistry {
                 timeZone: timeZone
             ),
             GeminiUsageProvider(
+                keychain: keychain,
                 fileReader: fileReader,
                 httpTransport: httpTransport,
                 disableStore: disableStore,
                 urlOpener: urlOpener,
+                quotaEndpoint: GeminiUsageProvider.defaultQuotaEndpoint,
                 requestTimeout: requestTimeout,
+                keychainTimeout: keychainTimeout,
                 clock: clock,
                 timeZone: timeZone
             ),

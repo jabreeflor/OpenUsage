@@ -1469,7 +1469,7 @@ final class LiveProvidersTests: XCTestCase {
             fileReader: StubLocalFileReader(files: [credsURL.path: validCreds]),
             httpTransport: StubHTTPTransport { req, _ in
                 if req.url?.absoluteString.contains("loadCodeAssist") == true {
-                    return HTTPResponseData(statusCode: 200, body: Data("{}".utf8))
+                    return HTTPResponseData(statusCode: 200, body: Data("{\"cloudaicompanionProject\":\"fixture-project\"}".utf8))
                 }
                 return HTTPResponseData(statusCode: 200, body: partialQuota)
             },
@@ -1873,7 +1873,7 @@ final class LiveProvidersTests: XCTestCase {
             ]),
             httpTransport: StubHTTPTransport { req, _ in
                 if req.url?.absoluteString.contains("loadCodeAssist") == true {
-                    return HTTPResponseData(statusCode: 200, body: Data("{\"paidTier\":{\"name\":\"\(opaqueSecret)\"}}".utf8))
+                    return HTTPResponseData(statusCode: 200, body: Data("{\"cloudaicompanionProject\":\"fixture-project\",\"paidTier\":{\"name\":\"\(opaqueSecret)\"}}".utf8))
                 }
                 return HTTPResponseData(statusCode: 200, body: geminiQuota)
             },
@@ -1955,18 +1955,18 @@ final class LiveProvidersTests: XCTestCase {
         XCTAssertTrue(expiredAuthResult.snapshot.limits.isEmpty)
     }
 
-    // MARK: - Round 2 Defect 5: Gemini Production Unsupported + Strict REQUESTS & 0...1 Validation
+    // MARK: - Round 2 Defect 5: Gemini Explicit Nil Endpoint Unsupported + Strict REQUESTS & 0...1 Validation
 
     func testGeminiProductionUnsupportedAndStrictQuotaBucketValidation() async {
         let credsURL = URL(fileURLWithPath: "/virtual/.gemini/oauth_creds.json")
         let futureMs = Int64(referenceNow.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
         let validCreds = Data("{\"access_token\":\"fixture-gemini-token-prod\",\"expiry_date\":\(futureMs)}".utf8)
         let neverHTTP = StubHTTPTransport { _, _ in
-            XCTFail("Production Gemini provider must not make unverified HTTP calls")
+            XCTFail("Gemini provider must not make HTTP calls when missing credentials or quotaEndpoint is nil")
             return HTTPResponseData(statusCode: 500, body: Data())
         }
 
-        // 1. Default production path: missing login -> .notConnected
+        // 1. Default production path: missing login -> .notConnected (zero HTTP)
         let missingProd = await GeminiUsageProvider(
             fileReader: StubLocalFileReader(),
             httpTransport: neverHTTP,
@@ -1977,17 +1977,18 @@ final class LiveProvidersTests: XCTestCase {
         ).fetchResult()
         XCTAssertEqual(missingProd.snapshot.connectionState, .notConnected)
 
-        // 2. Default production path: detected login -> labelled .unsupported (zero HTTP)
-        let detectedProd = await GeminiUsageProvider(
+        // 2. Explicit nil quotaEndpoint: detected login -> labelled .unsupported (zero HTTP)
+        let disabledEndpoint = await GeminiUsageProvider(
             fileReader: StubLocalFileReader(files: [credsURL.path: validCreds]),
             httpTransport: neverHTTP,
             disableStore: InMemoryProviderDisableStore(),
             oauthCredsURL: credsURL,
+            quotaEndpoint: nil,
             clock: { Self.referenceNow },
             timeZone: utc
         ).fetchResult()
-        XCTAssertEqual(detectedProd.snapshot.connectionState, .unsupported)
-        XCTAssertTrue(detectedProd.snapshot.connectedVia.localizedCaseInsensitiveContains("Not yet supported"))
+        XCTAssertEqual(disabledEndpoint.snapshot.connectionState, .unsupported)
+        XCTAssertTrue(disabledEndpoint.snapshot.connectedVia.localizedCaseInsensitiveContains("Not yet supported"))
         XCTAssertTrue(neverHTTP.requests.isEmpty)
 
         // 3. Injectable path: non-REQUESTS buckets only (TOKENS / missing tokenType) must NOT be published as Daily requests
@@ -1998,7 +1999,7 @@ final class LiveProvidersTests: XCTestCase {
             fileReader: StubLocalFileReader(files: [credsURL.path: validCreds]),
             httpTransport: StubHTTPTransport { req, _ in
                 if req.url?.absoluteString.contains("loadCodeAssist") == true {
-                    return HTTPResponseData(statusCode: 200, body: Data("{}".utf8))
+                    return HTTPResponseData(statusCode: 200, body: Data("{\"cloudaicompanionProject\":\"fixture-project\"}".utf8))
                 }
                 return HTTPResponseData(statusCode: 200, body: tokensOnlyBody)
             },
@@ -2019,7 +2020,7 @@ final class LiveProvidersTests: XCTestCase {
             fileReader: StubLocalFileReader(files: [credsURL.path: validCreds]),
             httpTransport: StubHTTPTransport { req, _ in
                 if req.url?.absoluteString.contains("loadCodeAssist") == true {
-                    return HTTPResponseData(statusCode: 200, body: Data("{}".utf8))
+                    return HTTPResponseData(statusCode: 200, body: Data("{\"cloudaicompanionProject\":\"fixture-project\"}".utf8))
                 }
                 return HTTPResponseData(statusCode: 200, body: negativeFractionBody)
             },

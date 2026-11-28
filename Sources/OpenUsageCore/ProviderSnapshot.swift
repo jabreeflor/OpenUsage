@@ -25,6 +25,9 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
     public let connectedVia: String
     public let updatedAt: Date
     public let showMenuBarPlaceholderWhileConnecting: Bool
+    /// Indicates that an authenticated session or stored credential exists even when limits are currently unavailable,
+    /// allowing the user to disconnect (Sign out) from Accounts.
+    public let canSignOut: Bool
 
     public init(
         provider: ProviderID,
@@ -33,7 +36,8 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
         limits: [UsageLimit],
         connectedVia: String,
         updatedAt: Date = Date(),
-        showMenuBarPlaceholderWhileConnecting: Bool = false
+        showMenuBarPlaceholderWhileConnecting: Bool = false,
+        canSignOut: Bool = false
     ) {
         self.provider = provider
         self.plan = plan
@@ -42,6 +46,30 @@ public struct ProviderSnapshot: Identifiable, Codable, Sendable, Equatable {
         self.connectedVia = connectedVia
         self.updatedAt = updatedAt
         self.showMenuBarPlaceholderWhileConnecting = showMenuBarPlaceholderWhileConnecting
+        self.canSignOut = canSignOut
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case plan
+        case connectionState
+        case limits
+        case connectedVia
+        case updatedAt
+        case showMenuBarPlaceholderWhileConnecting
+        case canSignOut
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.provider = try container.decode(ProviderID.self, forKey: .provider)
+        self.plan = try container.decode(String.self, forKey: .plan)
+        self.connectionState = try container.decode(ConnectionState.self, forKey: .connectionState)
+        self.limits = try container.decode([UsageLimit].self, forKey: .limits)
+        self.connectedVia = try container.decode(String.self, forKey: .connectedVia)
+        self.updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        self.showMenuBarPlaceholderWhileConnecting = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarPlaceholderWhileConnecting) ?? false
+        self.canSignOut = try container.decodeIfPresent(Bool.self, forKey: .canSignOut) ?? false
     }
 
     /// Returns the limit with the highest percent used. Ties break to the first occurrence.
