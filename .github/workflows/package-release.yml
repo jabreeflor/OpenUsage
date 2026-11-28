@@ -13,9 +13,15 @@ permissions:
 
 jobs:
   package:
-    runs-on: macos-15
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Verify release toolchain
+        run: |
+          xcodebuild -version
+          xcrun swift --version
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Build universal app and generate cask

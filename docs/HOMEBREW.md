@@ -18,6 +18,10 @@ Xcode 26.6.0 installation when available, otherwise the system-selected Xcode.
 Alternatively, run **Package release** in GitHub Actions with the version number
 and download the `OpenUsage-release` artifact. The workflow packages the selected
 branch or commit; it does not create a tag or publish a release.
+The hosted workflow explicitly selects Xcode 26.6 on the macOS 26 runner,
+matching the locally verified toolchain. Xcode 16.4 and 26.3 reject the current
+Keychain cancellation code during Swift concurrency checking. The app still
+targets macOS 14 and later.
 
 The local output directory is `build/release/0.1.0/`:
 
