@@ -1,0 +1,33 @@
+name: Package release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (for example, 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build universal app and generate cask
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: ./scripts/package-release.sh "$RELEASE_VERSION"
+      - name: Upload release files for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenUsage-release
+          path: |
+            build/release/*/OpenUsage-*-universal.zip
+            build/release/*/SHA256SUMS
+            build/release/*/openusage.rb
+          if-no-files-found: error
