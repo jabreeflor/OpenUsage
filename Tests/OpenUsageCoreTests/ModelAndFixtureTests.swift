@@ -97,13 +97,22 @@ final class ModelAndFixtureTests: XCTestCase {
         XCTAssertEqual(gemini.fullestLimit?.resetText, "312 of 1,500 · resets at midnight")
         XCTAssertEqual(gemini.menuBarEntryState, .connected(percent: 21))
 
-        // OpenCode
+        // OpenCode (Go three meters)
         let opencode = try XCTUnwrap(byID[.opencode])
-        XCTAssertEqual(opencode.plan, "Zen")
+        XCTAssertEqual(opencode.plan, "Go")
         XCTAssertEqual(opencode.connectionState, .connected)
-        XCTAssertEqual(opencode.fullestLimit?.name, "Credit used")
+        XCTAssertEqual(opencode.limits.count, 3)
+        XCTAssertEqual(opencode.limits[0].name, "5-hour")
+        XCTAssertEqual(opencode.limits[0].percentUsed, 24)
+        XCTAssertEqual(opencode.limits[0].resetText, "Resets in 3h 18m")
+        XCTAssertEqual(opencode.limits[1].name, "Weekly")
+        XCTAssertEqual(opencode.limits[1].percentUsed, 42)
+        XCTAssertEqual(opencode.limits[1].resetText, "Resets Mon 12:00 AM")
+        XCTAssertEqual(opencode.limits[2].name, "Monthly")
+        XCTAssertEqual(opencode.limits[2].percentUsed, 31)
+        XCTAssertEqual(opencode.limits[2].resetText, "Resets Dec 1")
+        XCTAssertEqual(opencode.fullestLimit?.name, "Weekly")
         XCTAssertEqual(opencode.fullestLimit?.percentUsed, 42)
-        XCTAssertEqual(opencode.fullestLimit?.resetText, "$8.40 of $20 this month")
         XCTAssertEqual(opencode.menuBarEntryState, .connected(percent: 42))
     }
 

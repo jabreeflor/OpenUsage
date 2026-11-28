@@ -22,7 +22,7 @@ Subscription limits and token history come from separate sources. Token totals r
 | ChatGPT / Codex | Rate-limit events from local Codex CLI sessions, with sign-in checked through `~/.codex/auth.json` | Codex CLI logs in `~/.codex/sessions` |
 | Cursor | Cursor usage endpoint, using the signed-in Cursor app session | No local token-history parser yet |
 | Gemini | Gemini CLI OAuth and Google quota endpoints; not yet verified with a live account | Gemini CLI logs in `~/.gemini/tmp` |
-| OpenCode | Local login detection only; live subscription limits are not yet supported | `~/.local/share/opencode/opencode.db` and legacy JSON message files under `storage/message` |
+| OpenCode | OpenCode Go usage endpoint (5-hour, weekly, and monthly limits), using the local `opencode-go` credential in `~/.local/share/opencode/auth.json` (respecting `XDG_DATA_HOME`); OpenCode Zen-only logins are detected as unsupported | `~/.local/share/opencode/opencode.db` and legacy JSON message files under `storage/message` |
 
 Claude weekly limits, Codex weekly limits, and Cursor included usage were verified during development. See the [build log](docs/BUILD_LOG.md) for verification details and remaining issues. Provider APIs and local file formats can change.
 
@@ -90,7 +90,7 @@ Quit the running instance before switching modes. Demo scenarios are `all`, `con
 
 ## Privacy and data
 
-OpenUsage reads existing tool credentials and session files without modifying those credentials or logs. Claude credentials come from Keychain; other integrations read the relevant tool's existing credential file or local session database. Live Claude, Cursor, and Gemini integrations make authenticated requests to their respective providers.
+OpenUsage reads existing tool credentials and session files without modifying those credentials or logs. Claude credentials come from Keychain; other integrations read the relevant tool's existing credential file or local session database. Live Claude, Cursor, Gemini, and OpenCode Go integrations make authenticated requests to their respective providers.
 
 Token logs are processed locally. Preferences and observed limit-hit history are stored locally, and limit-hit history begins with observations made by OpenUsage. Logs evicted to iCloud may need to download before they appear in totals.
 
@@ -128,6 +128,6 @@ xcodebuild \
 
 - Codex rollout files larger than 16 MiB are skipped, which can leave an older limit reading visible. An undated rate-limit event can also outrank a timestamped event.
 - An iCloud log download completing near its timeout can cause a duplicate read during refresh. Totals remain correct, but the extra read is unnecessary work.
-- Gemini live quota support remains unverified; OpenCode live limits and Cursor token history are incomplete, as noted above.
+- Gemini live quota support remains unverified; OpenCode Zen (non-Go) live limits and Cursor token history are not yet supported, as noted above.
 
 See [AGENTS.md](AGENTS.md) for contribution conventions and [docs/SPEC.md](docs/SPEC.md) for the product specification. Keep credentials, real account data, recordings, and GIFs out of Git.

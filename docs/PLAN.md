@@ -28,3 +28,12 @@ Orchestrator: Claude Fable 5.2. Implementer: Gemini 4 Neon (`agy --model gemini-
 ## Evidence (after milestone 7)
 
 Screenshots, two recordings and side-by-sides listed in `docs/ORCHESTRATION.md`, all from the real app in demo mode, written to `evidence/` (git-ignored) and attached to the PR with `gh … --attach`.
+
+## OpenCode Go follow-up — 2026-11-28
+
+Replace the unverified credit placeholder with the documented Go usage endpoint
+and its 5-hour, weekly, and monthly meters. Prefer the local `opencode-go` API
+key; keep Zen-only logins explicitly unsupported. Verify authentication/error
+states and strict response parsing with synthetic fixtures, run the core suite
+and app build, review with Astra, and record the Go demo interaction for the PR.
+Source: https://opencode.ai/docs/console/go/#usage.
