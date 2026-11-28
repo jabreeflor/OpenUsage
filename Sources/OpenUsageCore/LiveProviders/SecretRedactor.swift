@@ -11,13 +11,13 @@ public enum SecretRedactor {
             // JWTs (three base64url segments starting with eyJ)
             (#"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*\b"#, "[REDACTED]"),
             // Provider-prefixed keys and OAuth tokens
-            (#"\b(?:sk-ant-[A-Za-z0-9_-]{6,}|sk-[A-Za-z0-9_-]{8,}|ya29\.[A-Za-z0-9._-]{8,}|ghp_[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{8,}|oc_[A-Za-z0-9_-]{8,})\b"#, "[REDACTED]"),
+            (#"\b(?:sk-ant-[A-Za-z0-9_-]{6,}|sk-[A-Za-z0-9_-]{8,}|ya29\.[A-Za-z0-9._-]{8,}|GOCSPX-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{8,}|gho_[A-Za-z0-9]{8,}|oc_[A-Za-z0-9_-]{8,})\b"#, "[REDACTED]"),
             // Email addresses
             (#"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, "[REDACTED]"),
             // Sensitive URL query parameters
-            (#"(?i)([?&](?:access_token|refresh_token|id_token|token|key|api_key|apikey|secret|cookie|session|code|user|email)=)[^&\s]+"#, "$1[REDACTED]"),
+            (#"(?i)([?&](?:access_token|refresh_token|id_token|token|key|api_key|apikey|secret|client_secret|code_verifier|cookie|session|code|state|user|email)=)[^&\s]+"#, "$1[REDACTED]"),
             // Sensitive JSON string fields
-            (#"(?i)(\"(?:access_token|refresh_token|id_token|accessToken|refreshToken|token|key|apiKey|api_key|secret|cookie|email|account_id|accountId|user_id|userId)\"\s*:\s*\")[^\"]*(\")"#, "$1[REDACTED]$2")
+            (#"(?i)(\"(?:access_token|refresh_token|id_token|accessToken|refreshToken|token|key|apiKey|api_key|secret|client_secret|clientSecret|code_verifier|cookie|email|account_id|accountId|user_id|userId)\"\s*:\s*\")[^\"]*(\")"#, "$1[REDACTED]$2")
         ]
         return specs.compactMap { pattern, template in
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {

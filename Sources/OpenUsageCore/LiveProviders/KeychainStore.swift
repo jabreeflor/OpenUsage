@@ -206,55 +206,68 @@ public actor KeychainLookupCoordinator {
         }
     }
 
+    private struct LookupKey: Hashable, Sendable {
+        let service: String
+        let account: String?
+    }
+
     private struct InFlightLookup {
+        let epoch: UInt64
         var waiters: [UUID: WaiterBox] = [:]
     }
 
-    private var inFlight: [String: InFlightLookup] = [:]
-    private var unconsumedResults: [String: Result<Data?, Error>] = [:]
+    private var inFlight: [LookupKey: InFlightLookup] = [:]
+    private var unconsumedResults: [LookupKey: Result<Data?, Error>] = [:]
+    private var epochs: [LookupKey: UInt64] = [:]
 
     public init() {}
 
-    /// Discards any in-memory late result for `service` (for example on sign-out).
-    public func clearCachedResult(forService service: String) {
-        unconsumedResults.removeValue(forKey: service)
+    /// Discards any in-memory late result for `service` (and optional `account`) and invalidates
+    /// any currently in-flight lookup so stale pre-mutation reads cannot repopulate the cache.
+    public func clearCachedResult(forService service: String, account: String? = nil) {
+        let key = LookupKey(service: service, account: account)
+        epochs[key] = (epochs[key] ?? 0) &+ 1
+        unconsumedResults.removeValue(forKey: key)
     }
 
-    /// Reads a generic password for `service` off the MainActor and off Swift's cooperative thread pool,
-    /// joining any existing in-flight lookup for `service` rather than stacking duplicate reads.
+    /// Reads a generic password for `service` (and optional `account`) off the MainActor and off Swift's cooperative
+    /// thread pool, joining any existing in-flight lookup for the same key rather than stacking duplicate reads.
     public func readGenericPassword(
         using keychain: any KeychainReading,
         service: String,
+        account: String? = nil,
         timeout: TimeInterval
     ) async throws -> LookupOutcome {
         try Task.checkCancellation()
 
-        if let cached = unconsumedResults.removeValue(forKey: service) {
+        let key = LookupKey(service: service, account: account)
+        if let cached = unconsumedResults.removeValue(forKey: key) {
             return .completed(cached)
         }
 
         let effectiveTimeout = timeout.isFinite ? min(3600.0, max(0.01, timeout)) : URLSessionHTTPTransport.defaultTimeout
         let waiterID = UUID()
         let box = WaiterBox()
-        let shouldStartBackgroundRead = (inFlight[service] == nil)
+        let currentEpoch = epochs[key] ?? 0
+        let shouldStartBackgroundRead = (inFlight[key] == nil || inFlight[key]?.epoch != currentEpoch)
 
         if shouldStartBackgroundRead {
-            inFlight[service] = InFlightLookup(waiters: [waiterID: box])
+            inFlight[key] = InFlightLookup(epoch: currentEpoch, waiters: [waiterID: box])
         } else {
-            inFlight[service]?.waiters[waiterID] = box
+            inFlight[key]?.waiters[waiterID] = box
         }
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let timer = DispatchWorkItem { [weak self] in
                     if box.resolve(.success(.pending)) {
-                        Task { await self?.removeWaiter(waiterID, forService: service) }
+                        Task { await self?.removeWaiter(waiterID, forKey: key, epoch: currentEpoch) }
                     }
                 }
 
                 if Task.isCancelled {
                     if box.resolve(.failure(CancellationError())) {
-                        self.removeWaiter(waiterID, forService: service)
+                        self.removeWaiter(waiterID, forKey: key, epoch: currentEpoch)
                     }
                 }
 
@@ -268,40 +281,47 @@ public actor KeychainLookupCoordinator {
                     queue.async { [weak self] in
                         let result: Result<Data?, Error>
                         do {
-                            let data = try keychain.readGenericPassword(service: service, account: nil)
+                            let data = try keychain.readGenericPassword(service: service, account: account)
                             result = .success(data)
                         } catch {
                             result = .failure(error)
                         }
                         Task {
-                            await self?.completeLookup(forService: service, result: result)
+                            await self?.completeLookup(forKey: key, epoch: currentEpoch, result: result)
                         }
                     }
                 }
             }
         } onCancel: {
             if box.resolve(.failure(CancellationError())) {
-                Task { await self.removeWaiter(waiterID, forService: service) }
+                Task { await self.removeWaiter(waiterID, forKey: key, epoch: currentEpoch) }
             }
         }
     }
 
-    private func removeWaiter(_ id: UUID, forService service: String) {
-        inFlight[service]?.waiters.removeValue(forKey: id)
+    private func removeWaiter(_ id: UUID, forKey key: LookupKey, epoch: UInt64) {
+        guard inFlight[key]?.epoch == epoch else { return }
+        inFlight[key]?.waiters.removeValue(forKey: id)
     }
 
-    private func completeLookup(forService service: String, result: Result<Data?, Error>) {
-        guard let lookup = inFlight.removeValue(forKey: service) else {
+    private func completeLookup(forKey key: LookupKey, epoch: UInt64, result: Result<Data?, Error>) {
+        guard inFlight[key]?.epoch == epoch,
+              let lookup = inFlight.removeValue(forKey: key) else {
             return
         }
+        let isStillCurrent = ((epochs[key] ?? 0) == epoch)
         var deliveredToAnyWaiter = false
         for waiter in lookup.waiters.values {
-            if waiter.resolve(.success(.completed(result))) {
-                deliveredToAnyWaiter = true
+            if isStillCurrent {
+                if waiter.resolve(.success(.completed(result))) {
+                    deliveredToAnyWaiter = true
+                }
+            } else {
+                _ = waiter.resolve(.failure(CancellationError()))
             }
         }
-        if !deliveredToAnyWaiter {
-            unconsumedResults[service] = result
+        if !deliveredToAnyWaiter && isStillCurrent {
+            unconsumedResults[key] = result
         }
     }
 }
