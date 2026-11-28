@@ -18,6 +18,8 @@ Xcode 26.6.0 installation when available, otherwise the system-selected Xcode.
 Alternatively, run **Package release** in GitHub Actions with the version number
 and download the `OpenUsage-release` artifact. The workflow packages the selected
 branch or commit; it does not create a tag or publish a release.
+The hosted workflow explicitly selects Xcode 26.3 on the macOS 15 runner;
+that runner's default Xcode 16.4 compiler cannot build the current sources.
 
 The local output directory is `build/release/0.1.0/`:
 
