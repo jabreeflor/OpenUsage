@@ -715,15 +715,15 @@ final class LiveProvidersTests: XCTestCase {
 
     // MARK: - OpenCode Provider
 
-    func testOpenCodeProviderDefaultUnsupportedPlusFixtureSuccessExpiredNotConnectedMalformed() async throws {
+    func testOpenCodeProviderDefaultGoEndpointSuccessExpiredNotConnectedMalformed() async throws {
+        let goAuthFixture = try loadLiveFixture("opencode-auth-go.json")
         let successBody = try loadLiveFixture("opencode-usage-success.json")
         let malformedBody = try loadLiveFixture("opencode-usage-malformed.json")
         let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
-        let testEndpoint = URL(string: "https://opencode.invalid/api/usage")!
+        let testEndpoint = URL(string: "https://opencode.invalid/inference/go/v1/usage")!
 
-        let apiKeyAuth = Data("{\"opencode\":{\"type\":\"api\",\"key\":\"fixture-opencode-key-001\"}}".utf8)
         let pastMs = Int64(referenceNow.addingTimeInterval(-3600).timeIntervalSince1970 * 1000)
-        let expiredOAuth = Data("{\"opencode\":{\"type\":\"oauth\",\"access\":\"fixture-opencode-oauth-002\",\"expires\":\(pastMs)}}".utf8)
+        let expiredGoOAuth = Data("{\"opencode-go\":{\"type\":\"oauth\",\"access\":\"fixture-opencode-go-oauth-002\",\"expires\":\(pastMs)}}".utf8)
 
         // 1. Not connected (missing file)
         let missing = await OpenCodeUsageProvider(
@@ -738,43 +738,83 @@ final class LiveProvidersTests: XCTestCase {
             timeZone: utc
         ).fetchResult()
         XCTAssertEqual(missing.snapshot.connectionState, .notConnected)
+        XCTAssertEqual(missing.snapshot.menuBarEntryState, .omitted)
 
-        // 2. Default live mode (no verified endpoint) with local login -> honest .unsupported
-        let defaultUnsupported = await OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [authURL.path: apiKeyAuth]),
-            httpTransport: StubHTTPTransport { _, _ in
-                XCTFail("Default live OpenCode must not guess an unverified endpoint")
-                return HTTPResponseData(statusCode: 500, body: Data())
-            },
-            disableStore: InMemoryProviderDisableStore(),
+        // 2. Default production endpoint hits GET https://opencode.ai/inference/go/v1/usage with Bearer Go key
+        let defaultTransport = StubHTTPTransport { req, timeout in
+            XCTAssertEqual(timeout, URLSessionHTTPTransport.defaultTimeout)
+            XCTAssertEqual(req.httpMethod, "GET")
+            XCTAssertEqual(req.url?.absoluteString, "https://opencode.ai/inference/go/v1/usage")
+            XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-opencode-go-key-001")
+            XCTAssertEqual(req.value(forHTTPHeaderField: "Accept"), "application/json")
+            return HTTPResponseData(statusCode: 200, body: successBody)
+        }
+        let disableStore = InMemoryProviderDisableStore()
+        let urlOpener = RecordingURLOpener()
+        let defaultProvider = OpenCodeUsageProvider(
+            fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+            httpTransport: defaultTransport,
+            disableStore: disableStore,
+            urlOpener: urlOpener,
             authFileURL: authURL,
-            usageEndpoint: nil,
             clock: { Self.referenceNow },
             timeZone: utc
-        ).fetchResult()
-        XCTAssertEqual(defaultUnsupported.snapshot.connectionState, .unsupported)
-        XCTAssertTrue(defaultUnsupported.snapshot.connectedVia.localizedCaseInsensitiveContains("Not yet supported"))
-        XCTAssertEqual(defaultUnsupported.snapshot.menuBarEntryState, .omitted)
+        )
+        let success = await defaultProvider.fetchResult()
+        XCTAssertEqual(success.snapshot.connectionState, .connected)
+        XCTAssertEqual(success.snapshot.plan, "Go")
+        XCTAssertEqual(success.snapshot.connectedVia, OpenCodeUsageProvider.connectedSourceLabel)
+        XCTAssertEqual(success.snapshot.limits.map(\.id), ["opencode-rolling", "opencode-weekly", "opencode-monthly"])
+        XCTAssertEqual(success.snapshot.limits.map(\.name), ["5-hour", "Weekly", "Monthly"])
+        XCTAssertEqual(success.snapshot.limits.map(\.percentUsed), [30, 100, 50])
+        XCTAssertEqual(success.snapshot.limits[0].resetText, "Resets in 2h 19m")
+        XCTAssertEqual(success.snapshot.limits[1].resetText, "Rate limited · Resets Mon 12:00 AM")
+        XCTAssertEqual(success.snapshot.limits[2].resetText, "Resets Tue 12:00 AM")
+        XCTAssertEqual(success.snapshot.fullestLimit?.name, "Weekly")
+        XCTAssertEqual(success.snapshot.fullestLimit?.percentUsed, 100)
+        XCTAssertEqual(success.snapshot.menuBarEntryState, .connected(percent: 100))
+        XCTAssertEqual(success.diagnostic?.httpStatus, 200)
+        XCTAssertEqual(success.diagnostic?.warnings, [])
+        XCTAssertEqual(defaultTransport.requests.count, 1)
 
-        // 3. Injected endpoint success
-        let success = await OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [authURL.path: apiKeyAuth]),
-            httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 200, body: successBody) },
+        // Sign out disables provider without touching local file or network; sign in reconnects cleanly
+        let signedOut = try await defaultProvider.signOut()
+        XCTAssertEqual(signedOut.connectionState, .notConnected)
+        XCTAssertTrue(disableStore.isDisabled(.opencode))
+        let disabledFetch = await defaultProvider.fetchResult()
+        XCTAssertEqual(disabledFetch.snapshot.connectionState, .notConnected)
+        XCTAssertEqual(defaultTransport.requests.count, 1)
+
+        let reconnected = try await defaultProvider.signIn()
+        XCTAssertEqual(reconnected.connectionState, .connected)
+        XCTAssertFalse(disableStore.isDisabled(.opencode))
+        XCTAssertTrue(urlOpener.openedURLs.isEmpty)
+        XCTAssertEqual(defaultTransport.requests.count, 2)
+
+        // 3. Injected custom usageEndpoint works for tests
+        let injectedTransport = StubHTTPTransport { req, _ in
+            XCTAssertEqual(req.url, testEndpoint)
+            return HTTPResponseData(statusCode: 200, body: successBody)
+        }
+        let injected = await OpenCodeUsageProvider(
+            fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+            httpTransport: injectedTransport,
             disableStore: InMemoryProviderDisableStore(),
             authFileURL: authURL,
             usageEndpoint: testEndpoint,
             clock: { Self.referenceNow },
             timeZone: utc
         ).fetchResult()
-        XCTAssertEqual(success.snapshot.connectionState, .connected)
-        XCTAssertEqual(success.snapshot.plan, "Zen")
-        XCTAssertEqual(success.snapshot.limits.first?.percentUsed, 42)
-        XCTAssertTrue(success.snapshot.limits.first?.resetText.contains("$8.40 of $20") == true)
+        XCTAssertEqual(injected.snapshot.connectionState, .connected)
+        XCTAssertEqual(injectedTransport.requests.map(\.url), [testEndpoint.absoluteString])
 
-        // 4. Expired locally & via HTTP 401
+        // 4. Local OAuth expiry on opencode-go -> .expired without network
         let expiredLocal = await OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [authURL.path: expiredOAuth]),
-            httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 200, body: successBody) },
+            fileReader: StubLocalFileReader(files: [authURL.path: expiredGoOAuth]),
+            httpTransport: StubHTTPTransport { _, _ in
+                XCTFail("No HTTP expected when opencode-go OAuth token is already expired locally")
+                return HTTPResponseData(statusCode: 200, body: successBody)
+            },
             disableStore: InMemoryProviderDisableStore(),
             authFileURL: authURL,
             usageEndpoint: testEndpoint,
@@ -782,22 +822,11 @@ final class LiveProvidersTests: XCTestCase {
             timeZone: utc
         ).fetchResult()
         XCTAssertEqual(expiredLocal.snapshot.connectionState, .expired)
+        XCTAssertEqual(expiredLocal.snapshot.menuBarEntryState, .dimmedPlaceholder)
 
-        let expiredHTTP = await OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [authURL.path: apiKeyAuth]),
-            httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 401, body: Data()) },
-            disableStore: InMemoryProviderDisableStore(),
-            authFileURL: authURL,
-            usageEndpoint: testEndpoint,
-            clock: { Self.referenceNow },
-            timeZone: utc
-        ).fetchResult()
-        XCTAssertEqual(expiredHTTP.snapshot.connectionState, .expired)
-        XCTAssertEqual(expiredHTTP.diagnostic?.httpStatus, 401)
-
-        // 5. Malformed response -> .unsupported
+        // 5. Malformed 200 fixture -> .unsupported with warnings
         let malformed = await OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [authURL.path: apiKeyAuth]),
+            fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
             httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 200, body: malformedBody) },
             disableStore: InMemoryProviderDisableStore(),
             authFileURL: authURL,
@@ -806,6 +835,14 @@ final class LiveProvidersTests: XCTestCase {
             timeZone: utc
         ).fetchResult()
         XCTAssertEqual(malformed.snapshot.connectionState, .unsupported)
+        XCTAssertTrue(malformed.snapshot.limits.isEmpty)
+        XCTAssertEqual(malformed.snapshot.menuBarEntryState, .omitted)
+        XCTAssertEqual(malformed.diagnostic?.httpStatus, 200)
+        XCTAssertTrue(malformed.diagnostic?.warnings.contains("usage.rolling.status: present but not parseable") == true)
+        XCTAssertTrue(malformed.diagnostic?.warnings.contains("usage.rolling.percent: present but not parseable") == true)
+        XCTAssertTrue(malformed.diagnostic?.warnings.contains("usage.rolling.resetsAt: present but not parseable") == true)
+        XCTAssertTrue(malformed.diagnostic?.warnings.contains("usage.weekly.percent: present but not parseable") == true)
+        XCTAssertTrue(malformed.diagnostic?.warnings.contains("usage.monthly.percent: present but not parseable") == true)
     }
 
     // MARK: - KeychainStore Round-Trip Tests
@@ -1300,41 +1337,24 @@ final class LiveProvidersTests: XCTestCase {
         XCTAssertTrue(report.contains("opencode-go.key: string = <string len=\("fixture-opencode-go-key-001".count)>"))
     }
 
-    // MARK: - Finding 2 / Defect 10: OpenCode auth.json Detection Tests
+    // MARK: - Finding 2 / Defect 10: OpenCode Legacy Zen & Unrelated Key Handling Without HTTP
 
-    func testOpenCodeRecognizesOnlyOpenCodeSubscriptionEntriesWithoutHTTP() async throws {
-        let goFixture = try loadLiveFixture("opencode-auth-go.json")
+    func testOpenCodeLegacyZenRemainsUnsupportedAndUnrelatedThirdPartyKeysNeverTriggerHTTP() async throws {
         let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
         let neverHTTP = StubHTTPTransport { _, _ in
-            XCTFail("Live OpenCode provider must never call any HTTP endpoint")
+            XCTFail("Legacy Zen and unrelated third-party keys must never call the Go usage endpoint")
             return HTTPResponseData(statusCode: 500, body: Data())
         }
 
-        // Exact real-Mac shape: {"opencode-go": {"type": <string>, "key": <string>}}
-        let goResult = await OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [authURL.path: goFixture]),
-            httpTransport: neverHTTP,
-            disableStore: InMemoryProviderDisableStore(),
-            authFileURL: authURL,
-            clock: { Self.referenceNow },
-            timeZone: utc
-        ).fetchResult()
-
-        XCTAssertEqual(goResult.snapshot.connectionState, .unsupported)
-        XCTAssertEqual(goResult.snapshot.connectedVia, "Not yet supported — OpenCode login detected on this Mac")
-        XCTAssertEqual(goResult.snapshot.menuBarEntryState, .omitted)
-        XCTAssertTrue(neverHTTP.requests.isEmpty)
-
-        // All recognized OpenCode subscription keys count (`opencode`, `opencode-go`, `opencode-zen`, `zen`)
+        // Legacy Zen-only logins (`opencode`, `opencode-zen`, `zen`) remain detected as .unsupported with zero HTTP
         let futureMs = Int64(referenceNow.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
-        let recognizedPayloads: [Data] = [
-            Data("{\"opencode\":{\"type\":\"api\",\"key\":\"fixture-key-1\"}}".utf8),
-            Data("{\"opencode-go\":{\"type\":\"api\",\"key\":\"fixture-key-2\"}}".utf8),
-            Data("{\"opencode-zen\":{\"type\":\"oauth\",\"access\":\"fixture-access-3\",\"expires\":\(futureMs)}}".utf8),
-            Data("{\"zen\":{\"token\":\"fixture-token-4\"}}".utf8)
+        let legacyZenPayloads: [Data] = [
+            Data("{\"opencode\":{\"type\":\"api\",\"key\":\"fixture-zen-key-1\"}}".utf8),
+            Data("{\"opencode-zen\":{\"type\":\"oauth\",\"access\":\"fixture-zen-access-2\",\"expires\":\(futureMs)}}".utf8),
+            Data("{\"zen\":{\"token\":\"fixture-zen-token-3\"}}".utf8)
         ]
 
-        for payload in recognizedPayloads {
+        for payload in legacyZenPayloads {
             let result = await OpenCodeUsageProvider(
                 fileReader: StubLocalFileReader(files: [authURL.path: payload]),
                 httpTransport: neverHTTP,
@@ -1344,10 +1364,12 @@ final class LiveProvidersTests: XCTestCase {
                 timeZone: utc
             ).fetchResult()
             XCTAssertEqual(result.snapshot.connectionState, .unsupported)
-            XCTAssertEqual(result.snapshot.connectedVia, "Not yet supported — OpenCode login detected on this Mac")
+            XCTAssertTrue(result.snapshot.connectedVia.localizedCaseInsensitiveContains("Not yet supported"))
+            XCTAssertTrue(result.snapshot.connectedVia.localizedCaseInsensitiveContains("Zen"))
+            XCTAssertEqual(result.snapshot.menuBarEntryState, .omitted)
         }
 
-        // Unrelated vendor entries ONLY (even valid or expired!) -> .notConnected
+        // Unrelated vendor entries ONLY (even valid or expired!) -> .notConnected with zero HTTP
         let pastMs = Int64(referenceNow.addingTimeInterval(-3600).timeIntervalSince1970 * 1000)
         let unrelatedPayloads: [Data] = [
             Data("{\"anthropic\":{\"type\":\"api\",\"key\":\"fixture-vendor-key-1\"}}".utf8),
@@ -1885,22 +1907,28 @@ final class LiveProvidersTests: XCTestCase {
         ).fetchResult()
         XCTAssertEqual(geminiResult.snapshot.plan, "")
 
-        // 5. OpenCode (injected): unknown plan
+        // 5. OpenCode Go: extra upstream plan/secret fields never echo into snapshot or report
         let openCodeAuthURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
         let openCodeResult = await OpenCodeUsageProvider(
             fileReader: StubLocalFileReader(files: [
-                openCodeAuthURL.path: Data("{\"opencode\":{\"type\":\"api\",\"key\":\"fixture-key\"}}".utf8)
+                openCodeAuthURL.path: Data("{\"opencode-go\":{\"type\":\"api\",\"key\":\"fixture-go-key\"}}".utf8)
             ]),
             httpTransport: StubHTTPTransport { _, _ in
-                HTTPResponseData(statusCode: 200, body: Data("{\"plan\":\"\(opaqueSecret)\",\"used_usd\":5,\"limit_usd\":20}".utf8))
+                HTTPResponseData(
+                    statusCode: 200,
+                    body: Data("""
+                    {"plan":"\(opaqueSecret)","usage":{"rolling":{"status":"ok","percent":25,"resetsAt":"2026-11-26T21:00:00.000Z"}}}
+                    """.utf8)
+                )
             },
             disableStore: InMemoryProviderDisableStore(),
             authFileURL: openCodeAuthURL,
-            usageEndpoint: URL(string: "https://opencode.invalid/api/usage")!,
+            usageEndpoint: URL(string: "https://opencode.invalid/inference/go/v1/usage")!,
             clock: { Self.referenceNow },
             timeZone: utc
         ).fetchResult()
-        XCTAssertEqual(openCodeResult.snapshot.plan, "")
+        XCTAssertEqual(openCodeResult.snapshot.connectionState, .connected)
+        XCTAssertEqual(openCodeResult.snapshot.plan, "Go")
 
         // Normal --dump-limits report must not contain opaqueSecret in any casing
         let report = LimitsDumper.formatReport(
@@ -2332,23 +2360,27 @@ final class LiveProvidersTests: XCTestCase {
         XCTAssertTrue(cursorResult.diagnostic?.warnings.contains("planUsage.limit: present but not parseable") == true)
         XCTAssertTrue(cursorResult.diagnostic?.warnings.contains("planUsage.includedSpend: present but not parseable") == true)
 
-        // 3. OpenCode with used_usd = 1e20 / limit_usd = 1e20 rejects those fields without trapping
+        // 3. OpenCode Go with percent = 1e20 rejects the field safely without trapping
         let openCodeAuthURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
         let openCodeHuge = OpenCodeUsageProvider(
-            fileReader: StubLocalFileReader(files: [openCodeAuthURL.path: Data("{\"opencode\":{\"type\":\"api\",\"key\":\"fixture-key\"}}".utf8)]),
+            fileReader: StubLocalFileReader(files: [openCodeAuthURL.path: Data("{\"opencode-go\":{\"type\":\"api\",\"key\":\"fixture-go-key\"}}".utf8)]),
             httpTransport: StubHTTPTransport { _, _ in
-                HTTPResponseData(statusCode: 200, body: Data("{\"plan\":\"Zen\",\"used_usd\":1e20,\"limit_usd\":1e20}".utf8))
+                HTTPResponseData(
+                    statusCode: 200,
+                    body: Data("""
+                    {"usage":{"rolling":{"status":"ok","percent":1e20,"resetsAt":"2026-11-26T21:00:00.000Z"}}}
+                    """.utf8)
+                )
             },
             disableStore: InMemoryProviderDisableStore(),
             authFileURL: openCodeAuthURL,
-            usageEndpoint: URL(string: "https://opencode.invalid/api/usage")!,
+            usageEndpoint: URL(string: "https://opencode.invalid/inference/go/v1/usage")!,
             clock: { Self.referenceNow },
             timeZone: utc
         )
         let openCodeResult = await openCodeHuge.fetchResult()
         XCTAssertEqual(openCodeResult.snapshot.connectionState, .unsupported)
-        XCTAssertTrue(openCodeResult.diagnostic?.warnings.contains("used_usd: present but not parseable") == true)
-        XCTAssertTrue(openCodeResult.diagnostic?.warnings.contains("limit_usd: present but not parseable") == true)
+        XCTAssertTrue(openCodeResult.diagnostic?.warnings.contains("usage.rolling.percent: present but not parseable") == true)
 
         // 4. Running all providers together: Codex rejects 1e20 while Claude continues and returns .connected
         let futureMs = Int64(referenceNow.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
@@ -3008,6 +3040,431 @@ final class LiveProvidersTests: XCTestCase {
         XCTAssertEqual(totalResult.snapshot.connectionState, .connected)
         XCTAssertEqual(totalResult.snapshot.limits.map(\.name), ["Included usage"])
         XCTAssertEqual(totalResult.snapshot.limits.map(\.percentUsed), [34])
+    }
+
+    // MARK: - OpenCode Go Live Support Tests
+
+    func testOpenCodeGoKeyPrecedenceOverZenAndThirdPartyKeys() async throws {
+        let successBody = try loadLiveFixture("opencode-usage-success.json")
+        let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
+        let pastMs = Int64(referenceNow.addingTimeInterval(-3600).timeIntervalSince1970 * 1000)
+
+        // When opencode, zen, opencode-zen, anthropic, and opencode-go all exist, opencode-go wins!
+        let combinedAuth = Data("""
+        {
+          "anthropic": {"type": "api", "key": "fixture-anthropic-third-party-key"},
+          "opencode": {"type": "oauth", "access": "fixture-zen-expired-token", "expires": \(pastMs)},
+          "zen": {"type": "api", "key": "fixture-legacy-zen-key"},
+          "opencode-zen": {"type": "api", "key": "fixture-opencode-zen-key"},
+          "opencode-go": {"type": "api", "key": "fixture-preferred-go-key-999"}
+        }
+        """.utf8)
+
+        final class AuthHeaderCapture: @unchecked Sendable {
+            private let lock = NSLock()
+            private var values: [String] = []
+            func append(_ value: String) { lock.withLock { values.append(value) } }
+            var headers: [String] { lock.withLock { values } }
+        }
+
+        let headerCapture = AuthHeaderCapture()
+        let transport = StubHTTPTransport { req, _ in
+            headerCapture.append(req.value(forHTTPHeaderField: "Authorization") ?? "")
+            return HTTPResponseData(statusCode: 200, body: successBody)
+        }
+
+        let result = await OpenCodeUsageProvider(
+            fileReader: StubLocalFileReader(files: [authURL.path: combinedAuth]),
+            httpTransport: transport,
+            disableStore: InMemoryProviderDisableStore(),
+            authFileURL: authURL,
+            clock: { Self.referenceNow },
+            timeZone: utc
+        ).fetchResult()
+
+        XCTAssertEqual(result.snapshot.connectionState, .connected)
+        XCTAssertEqual(result.snapshot.plan, "Go")
+        XCTAssertEqual(result.snapshot.limits.count, 3)
+        XCTAssertEqual(headerCapture.headers, ["Bearer fixture-preferred-go-key-999"])
+    }
+
+    func testOpenCodeGoRefreshOnlyCredentialsNeverCallUsageAPI() async {
+        let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
+        let neverHTTP = StubHTTPTransport { _, _ in
+            XCTFail("Refresh credentials must never be sent to the OpenCode Go usage API")
+            return HTTPResponseData(statusCode: 500, body: Data())
+        }
+
+        let refreshPayloads: [(name: String, secret: String, json: String)] = [
+            ("refresh", "fixture-refresh-secret-alpha", #"{"opencode-go":{"type":"oauth","refresh":"fixture-refresh-secret-alpha"}}"#),
+            ("refresh_token", "fixture-refresh-secret-beta", #"{"opencode-go":{"type":"oauth","refresh_token":"fixture-refresh-secret-beta"}}"#),
+            ("refreshToken", "fixture-refresh-secret-gamma", #"{"opencode-go":{"type":"oauth","access":"   ","refreshToken":"fixture-refresh-secret-gamma"}}"#)
+        ]
+
+        for entry in refreshPayloads {
+            let result = await OpenCodeUsageProvider(
+                fileReader: StubLocalFileReader(files: [authURL.path: Data(entry.json.utf8)]),
+                httpTransport: neverHTTP,
+                disableStore: InMemoryProviderDisableStore(),
+                authFileURL: authURL,
+                clock: { Self.referenceNow },
+                timeZone: utc
+            ).fetchResult(captureShape: true)
+
+            XCTAssertEqual(result.snapshot.connectionState, .unsupported, "Failed for \(entry.name)")
+            XCTAssertNotEqual(result.snapshot.connectionState, .expired)
+            XCTAssertTrue(result.snapshot.limits.isEmpty)
+            XCTAssertEqual(result.snapshot.menuBarEntryState, .omitted)
+
+            let report = LimitsDumper.formatReport(results: [result], isDemo: false)
+            let shapeReport = LimitsDumper.formatShapeReport(results: [result], isDemo: false)
+            XCTAssertFalse(report.contains(entry.secret))
+            XCTAssertFalse(shapeReport.contains(entry.secret))
+        }
+        XCTAssertTrue(neverHTTP.requests.isEmpty)
+    }
+
+    @MainActor
+    func testOpenCodeGo401InvalidKeyVs403MissingEntitlementAndTransientErrors() async throws {
+        let goAuthFixture = try loadLiveFixture("opencode-auth-go.json")
+        let successBody = try loadLiveFixture("opencode-usage-success.json")
+        let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
+
+        // 1. HTTP 401 -> .expired (invalid key)
+        let unauthorized = await OpenCodeUsageProvider(
+            fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+            httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 401, body: Data("{\"error\":\"invalid_api_key\"}".utf8)) },
+            disableStore: InMemoryProviderDisableStore(),
+            authFileURL: authURL,
+            clock: { Self.referenceNow },
+            timeZone: utc
+        ).fetchResult()
+        XCTAssertEqual(unauthorized.snapshot.connectionState, .expired)
+        XCTAssertEqual(unauthorized.snapshot.menuBarEntryState, .dimmedPlaceholder)
+        XCTAssertEqual(unauthorized.diagnostic?.httpStatus, 401)
+        XCTAssertEqual(unauthorized.diagnostic?.isTransientError, false)
+
+        // 2. HTTP 403 -> .unsupported (valid key without Go entitlement, NOT .expired!)
+        let forbidden = await OpenCodeUsageProvider(
+            fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+            httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 403, body: Data("{\"error\":\"go_entitlement_required\"}".utf8)) },
+            disableStore: InMemoryProviderDisableStore(),
+            authFileURL: authURL,
+            clock: { Self.referenceNow },
+            timeZone: utc
+        ).fetchResult()
+        XCTAssertNotEqual(forbidden.snapshot.connectionState, .expired)
+        XCTAssertEqual(forbidden.snapshot.connectionState, .unsupported)
+        XCTAssertEqual(forbidden.snapshot.menuBarEntryState, .omitted)
+        XCTAssertTrue(forbidden.snapshot.connectedVia.localizedCaseInsensitiveContains("Go"))
+        XCTAssertEqual(forbidden.diagnostic?.httpStatus, 403)
+        XCTAssertEqual(forbidden.diagnostic?.isTransientError, false)
+
+        // 3. Transient HTTP errors (429, 503) & transport errors (.timedOut, .networkUnavailable)
+        for status in [429, 500, 503] {
+            let transient = await OpenCodeUsageProvider(
+                fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+                httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: status, body: Data()) },
+                disableStore: InMemoryProviderDisableStore(),
+                authFileURL: authURL,
+                clock: { Self.referenceNow },
+                timeZone: utc
+            ).fetchResult()
+            XCTAssertEqual(transient.snapshot.connectionState, .unsupported)
+            XCTAssertEqual(transient.diagnostic?.httpStatus, status)
+            XCTAssertEqual(transient.diagnostic?.isTransientError, true)
+        }
+
+        for transportError in [LiveProviderTransportError.timedOut, .networkUnavailable] {
+            let failed = await OpenCodeUsageProvider(
+                fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+                httpTransport: StubHTTPTransport { _, _ in throw transportError },
+                disableStore: InMemoryProviderDisableStore(),
+                authFileURL: authURL,
+                clock: { Self.referenceNow },
+                timeZone: utc
+            ).fetchResult()
+            XCTAssertEqual(failed.snapshot.connectionState, .unsupported)
+            XCTAssertEqual(failed.snapshot.connectedVia, transportError.shortReason)
+            XCTAssertEqual(failed.diagnostic?.shortReason, transportError.shortReason)
+            XCTAssertEqual(failed.diagnostic?.isTransientError, true)
+        }
+
+        // 4. Transient error in AccountsController preserves previously connected Go limits and applies backoff
+        final class AtomicBoolBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: Bool
+            init(_ initial: Bool) { self.value = initial }
+            func get() -> Bool { lock.withLock { value } }
+            func set(_ next: Bool) { lock.withLock { value = next } }
+        }
+
+        let clock = MutableClock(referenceNow)
+        let shouldFail = AtomicBoolBox(false)
+        let flakyProvider = OpenCodeUsageProvider(
+            fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+            httpTransport: StubHTTPTransport { _, _ in
+                if shouldFail.get() {
+                    return HTTPResponseData(statusCode: 503, body: Data())
+                }
+                return HTTPResponseData(statusCode: 200, body: successBody)
+            },
+            disableStore: InMemoryProviderDisableStore(),
+            authFileURL: authURL,
+            clock: { clock.now },
+            timeZone: utc
+        )
+        let providers: [any UsageProvider] = [
+            UnconfiguredUsageProvider(provider: .claude),
+            UnconfiguredUsageProvider(provider: .chatgpt),
+            UnconfiguredUsageProvider(provider: .cursor),
+            UnconfiguredUsageProvider(provider: .gemini),
+            flakyProvider
+        ]
+        let initial = ProviderID.allCases.map {
+            ProviderSnapshot(provider: $0, plan: "", connectionState: .notConnected, limits: [], connectedVia: "Not connected")
+        }
+        let controller = AccountsController(
+            isDemo: false,
+            initialSnapshots: initial,
+            providers: providers,
+            clock: { clock.now }
+        )
+
+        await controller.refreshAll()
+        XCTAssertEqual(controller.snapshot(for: .opencode).connectionState, .connected)
+        XCTAssertEqual(controller.snapshot(for: .opencode).limits.count, 3)
+
+        shouldFail.set(true)
+        await controller.refreshAll()
+        XCTAssertEqual(controller.snapshot(for: .opencode).connectionState, .connected)
+        XCTAssertEqual(controller.snapshot(for: .opencode).limits.count, 3)
+        XCTAssertEqual(controller.consecutiveFailureCount(for: .opencode), 1)
+        XCTAssertEqual(controller.nextAllowedRefreshDate(for: .opencode), referenceNow.addingTimeInterval(60))
+    }
+
+    func testOpenCodeGoStrictMeterValidationPercentsTimestampsStatusAndMalformedPayloads() async throws {
+        let goAuthFixture = try loadLiveFixture("opencode-auth-go.json")
+        let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
+
+        func fetch(_ json: String) async -> ProviderFetchResult {
+            await OpenCodeUsageProvider(
+                fileReader: StubLocalFileReader(files: [authURL.path: goAuthFixture]),
+                httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: 200, body: Data(json.utf8)) },
+                disableStore: InMemoryProviderDisableStore(),
+                authFileURL: authURL,
+                clock: { Self.referenceNow },
+                timeZone: utc
+            ).fetchResult()
+        }
+
+        // 1. Boundary percents (0 and 100), past resetsAt ("Resetting"), and null resetsAt ("Reset time unavailable")
+        let boundaries = await fetch("""
+        {
+          "usage": {
+            "rolling": {"status": "ok", "percent": 0, "resetsAt": null},
+            "weekly": {"status": "ok", "percent": 100, "resetsAt": "2026-11-26T18:00:00.000Z"},
+            "monthly": {"status": "rate-limited", "percent": 100, "resetsAt": "2026-12-10T00:00:00Z"}
+          }
+        }
+        """)
+        XCTAssertEqual(boundaries.snapshot.connectionState, .connected)
+        XCTAssertEqual(boundaries.snapshot.limits.map(\.percentUsed), [0, 100, 100])
+        XCTAssertEqual(boundaries.snapshot.limits[0].resetText, "Reset time unavailable")
+        XCTAssertEqual(boundaries.snapshot.limits[1].resetText, "Resetting")
+        XCTAssertEqual(boundaries.snapshot.limits[2].resetText, "Rate limited · Resets Dec 10")
+        XCTAssertEqual(boundaries.diagnostic?.warnings, [])
+
+        // 2. Malformed root / missing usage / speculative legacy credit response -> .unsupported
+        let malformedRoots = [
+            "not json at all",
+            "[]",
+            "{}",
+            #"{"usage":null}"#,
+            #"{"usage":"bad"}"#,
+            #"{"usage":{}}"#,
+            #"{"plan":"Zen","used_usd":8.4,"limit_usd":20.0,"resets_at":"2026-12-01T00:00:00Z"}"#
+        ]
+        for body in malformedRoots {
+            let res = await fetch(body)
+            XCTAssertEqual(res.snapshot.connectionState, .unsupported, "Expected unsupported for: \(body)")
+            XCTAssertTrue(res.snapshot.limits.isEmpty)
+        }
+
+        // 3. Invalid / bool / decimal / string / out-of-range percents -> rejected with warning
+        let invalidPercents = [
+            "true",
+            "false",
+            "-1",
+            "101",
+            "30.5",
+            "\"30\"",
+            "null",
+            "1e20"
+        ]
+        for rawPercent in invalidPercents {
+            let res = await fetch("""
+            {"usage":{"rolling":{"status":"ok","percent":\(rawPercent),"resetsAt":"2026-11-26T21:00:00.000Z"}}}
+            """)
+            XCTAssertEqual(res.snapshot.connectionState, .unsupported, "Expected rejection for percent=\(rawPercent)")
+            XCTAssertTrue(res.snapshot.limits.isEmpty)
+            XCTAssertTrue(res.diagnostic?.warnings.contains("usage.rolling.percent: present but not parseable") == true)
+        }
+
+        // 4. Bad timestamps (non-ISO8601, empty, numeric epoch, missing timezone, invalid calendar date) -> rejected with warning
+        let invalidTimestamps = [
+            "\"not-a-timestamp\"",
+            "\"\"",
+            "1795734000",
+            "true",
+            "\"2026-11-26 21:00:00Z\"",
+            "\"2026-11-26T21:00:00\"",
+            "\"2026-02-30T00:00:00Z\""
+        ]
+        for rawTS in invalidTimestamps {
+            let res = await fetch("""
+            {"usage":{"weekly":{"status":"ok","percent":40,"resetsAt":\(rawTS)}}}
+            """)
+            XCTAssertEqual(res.snapshot.connectionState, .unsupported, "Expected rejection for resetsAt=\(rawTS)")
+            XCTAssertTrue(res.snapshot.limits.isEmpty)
+            XCTAssertTrue(res.diagnostic?.warnings.contains("usage.weekly.resetsAt: present but not parseable") == true)
+        }
+
+        // 5. Bad status values (unknown string, wrong case, non-string, null, missing) -> rejected with warning
+        let invalidStatuses = [
+            "\"unknown\"",
+            "\"OK\"",
+            "\"\"",
+            "true",
+            "200",
+            "null"
+        ]
+        for rawStatus in invalidStatuses {
+            let res = await fetch("""
+            {"usage":{"monthly":{"status":\(rawStatus),"percent":50,"resetsAt":"2026-12-01T00:00:00.000Z"}}}
+            """)
+            XCTAssertEqual(res.snapshot.connectionState, .unsupported, "Expected rejection for status=\(rawStatus)")
+            XCTAssertTrue(res.snapshot.limits.isEmpty)
+            XCTAssertTrue(res.diagnostic?.warnings.contains("usage.monthly.status: present but not parseable") == true)
+        }
+        let missingStatus = await fetch("""
+        {"usage":{"monthly":{"percent":50,"resetsAt":"2026-12-01T00:00:00.000Z"}}}
+        """)
+        XCTAssertEqual(missingStatus.snapshot.connectionState, .unsupported)
+        XCTAssertTrue(missingStatus.diagnostic?.warnings.contains("usage.monthly.status: present but not parseable") == true)
+
+        // 6. Partial corruption: one bad meter emits warning while remaining valid meters still publish
+        let partial = await fetch("""
+        {
+          "usage": {
+            "rolling": {"status": "ok", "percent": 25, "resetsAt": "2026-11-26T21:00:00.000Z"},
+            "weekly": {"status": "ok", "percent": true, "resetsAt": "2026-11-30T00:00:00.000Z"},
+            "monthly": {"status": "ok", "percent": 60, "resetsAt": "2026-12-01T00:00:00.000Z"}
+          }
+        }
+        """)
+        XCTAssertEqual(partial.snapshot.connectionState, .connected)
+        XCTAssertEqual(partial.snapshot.limits.map(\.name), ["5-hour", "Monthly"])
+        XCTAssertEqual(partial.snapshot.limits.map(\.percentUsed), [25, 60])
+        XCTAssertEqual(partial.diagnostic?.warnings, ["usage.weekly.percent: present but not parseable"])
+    }
+
+    func testOpenCodeGoDiagnosticsAndShapeRedactionNeverLeakCredentials() async {
+        let authURL = URL(fileURLWithPath: "/virtual/.local/share/opencode/auth.json")
+        let syntheticGoKey = ["oc", "syntheticgokey987654321"].joined(separator: "_")
+        let syntheticZenKey = ["oc", "syntheticzenkey123456789"].joined(separator: "_")
+        let syntheticEmail = "go.user@example.com"
+        let syntheticAccountID = "acct_9988776655"
+
+        let authData = Data("""
+        {
+          "opencode-go": {"type": "api", "key": "\(syntheticGoKey)"},
+          "opencode": {"type": "api", "key": "\(syntheticZenKey)"}
+        }
+        """.utf8)
+
+        let leakySuccessBody = Data("""
+        {
+          "usage": {
+            "rolling": {"status": "ok", "percent": 30, "resetsAt": "2026-11-26T21:00:00.000Z"},
+            "weekly": {"status": "rate-limited", "percent": 100, "resetsAt": "2026-11-30T00:00:00.000Z"},
+            "monthly": {"status": "ok", "percent": 50, "resetsAt": "2026-12-01T00:00:00.000Z"}
+          },
+          "account": {"email": "\(syntheticEmail)", "id": "\(syntheticAccountID)", "key": "\(syntheticGoKey)"}
+        }
+        """.utf8)
+        let leakyErrorBody = Data("""
+        {"error":"Bearer \(syntheticGoKey) denied for \(syntheticEmail) (\(syntheticAccountID))"}
+        """.utf8)
+
+        let cases: [(Int, Data)] = [
+            (200, leakySuccessBody),
+            (401, leakyErrorBody),
+            (403, leakyErrorBody),
+            (500, leakyErrorBody)
+        ]
+
+        for (status, body) in cases {
+            let result = await OpenCodeUsageProvider(
+                fileReader: StubLocalFileReader(files: [authURL.path: authData]),
+                httpTransport: StubHTTPTransport { _, _ in HTTPResponseData(statusCode: status, body: body) },
+                disableStore: InMemoryProviderDisableStore(),
+                authFileURL: authURL,
+                clock: { Self.referenceNow },
+                timeZone: utc
+            ).fetchResult(captureShape: true)
+
+            let dumpReport = LimitsDumper.formatReport(results: [result], isDemo: false)
+            let shapeReport = LimitsDumper.formatShapeReport(results: [result], isDemo: false)
+
+            for output in [dumpReport, shapeReport] {
+                XCTAssertFalse(output.contains(syntheticGoKey))
+                XCTAssertFalse(output.contains(syntheticZenKey))
+                XCTAssertFalse(output.contains(syntheticEmail))
+                XCTAssertFalse(output.contains(syntheticAccountID))
+            }
+
+            if status == 200 {
+                XCTAssertTrue(shapeReport.contains("usage.rolling.status: string = ok"))
+                XCTAssertTrue(shapeReport.contains("usage.rolling.percent: number = 30"))
+                XCTAssertTrue(shapeReport.contains("usage.rolling.resetsAt: string = 2026-11-26T21:00:00.000Z"))
+                XCTAssertTrue(shapeReport.contains("usage.weekly.status: string = rate-limited"))
+                XCTAssertTrue(shapeReport.contains("usage.weekly.percent: number = 100"))
+                XCTAssertTrue(shapeReport.contains("usage.monthly.percent: number = 50"))
+                XCTAssertFalse(shapeReport.contains("account.email"))
+            }
+        }
+    }
+
+    func testOpenCodeDefaultAuthFileURLHonorsXDGDataHome() {
+        let home = "/Users/fixture"
+
+        // Unset XDG_DATA_HOME -> ~/.local/share/opencode/auth.json
+        XCTAssertEqual(
+            OpenCodeUsageProvider.defaultAuthFileURL(environment: [:], homeDirectory: home).path,
+            "/Users/fixture/.local/share/opencode/auth.json"
+        )
+
+        // Absolute XDG_DATA_HOME -> $XDG_DATA_HOME/opencode/auth.json
+        XCTAssertEqual(
+            OpenCodeUsageProvider.defaultAuthFileURL(environment: ["XDG_DATA_HOME": "/custom/xdg/data"], homeDirectory: home).path,
+            "/custom/xdg/data/opencode/auth.json"
+        )
+
+        // Trailing slash and surrounding whitespace handled cleanly
+        XCTAssertEqual(
+            OpenCodeUsageProvider.defaultAuthFileURL(environment: ["XDG_DATA_HOME": "  /custom/xdg/data/  "], homeDirectory: home).path,
+            "/custom/xdg/data/opencode/auth.json"
+        )
+
+        // Empty, whitespace-only, or relative XDG_DATA_HOME -> falls back to ~/.local/share/opencode/auth.json
+        for invalid in ["", "   ", "relative/data"] {
+            XCTAssertEqual(
+                OpenCodeUsageProvider.defaultAuthFileURL(environment: ["XDG_DATA_HOME": invalid], homeDirectory: home).path,
+                "/Users/fixture/.local/share/opencode/auth.json",
+                "Expected fallback for XDG_DATA_HOME=\(invalid)"
+            )
+        }
     }
 
     // MARK: - SQLite Helper

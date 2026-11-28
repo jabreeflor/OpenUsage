@@ -23,6 +23,36 @@ internal enum StrictJSON {
         return nil
     }
 
+    /// Parses an exact `Int` from a JSON integer number, strictly rejecting booleans, strings, and non-integer decimals.
+    static func integer(_ raw: Any?) -> Int? {
+        guard let value = double(raw) else { return nil }
+        return Int(exactly: value)
+    }
+
+    /// Parses a strict ISO-8601 timestamp string with a `T`/`t` separator and explicit timezone (`Z` or `±HH:MM`).
+    /// Rejects non-strings, whitespace, missing timezone designators, and numeric epochs.
+    static func iso8601Timestamp(_ raw: Any?) -> Date? {
+        guard let str = raw as? String, !str.isEmpty else { return nil }
+        guard !str.contains(where: \.isWhitespace) else { return nil }
+        let bytes = Array(str.utf8)
+        guard bytes.count >= 20, bytes[10] == 84 || bytes[10] == 116 else { return nil } // 'T' or 't'
+        var idx = 19
+        if idx < bytes.count && (bytes[idx] == 46 || bytes[idx] == 44) { // '.' or ','
+            idx += 1
+            let start = idx
+            while idx < bytes.count, bytes[idx] >= 48, bytes[idx] <= 57 {
+                idx += 1
+            }
+            guard idx > start else { return nil }
+        }
+        guard idx < bytes.count else { return nil }
+        let tzMarker = bytes[idx]
+        guard tzMarker == 90 || tzMarker == 122 || tzMarker == 43 || tzMarker == 45 else { // 'Z', 'z', '+', '-'
+            return nil
+        }
+        return LogTimestampParser.parseISO8601(str)
+    }
+
     /// Parses a finite `Double` from either a JSON number or numeric string (used for int64 timestamps encoded as strings).
     static func numericOrStringDouble(_ raw: Any?) -> Double? {
         if let d = double(raw) {

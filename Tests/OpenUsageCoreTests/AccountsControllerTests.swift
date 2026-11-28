@@ -266,7 +266,8 @@ final class AccountsControllerTests: XCTestCase {
 
         let connected = controller.snapshot(for: .opencode)
         XCTAssertEqual(connected.connectionState, .connected)
-        XCTAssertEqual(connected.plan, "Zen")
+        XCTAssertEqual(connected.plan, "Go")
+        XCTAssertEqual(connected.limits.map(\.name), ["5-hour", "Weekly", "Monthly"])
         XCTAssertEqual(connected.fullestLimit?.percentUsed, 42)
         XCTAssertEqual(connected.connectedVia, "Signed in with OpenCode")
         XCTAssertEqual(connected.menuBarEntryState, .connected(percent: 42))

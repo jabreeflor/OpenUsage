@@ -433,15 +433,27 @@ public enum JSONShapeFormatter {
                 "opencode-go",
                 "opencode-zen",
                 "zen",
-                "plan",
-                "used_usd",
-                "limit_usd",
-                "resets_at",
-                "resetsAt",
-                "used",
-                "limit",
-                "remaining",
-                "percent_used"
+                "usage"
+            ],
+            "usage": [
+                "rolling",
+                "weekly",
+                "monthly"
+            ],
+            "usage.rolling": [
+                "status",
+                "percent",
+                "resetsAt"
+            ],
+            "usage.weekly": [
+                "status",
+                "percent",
+                "resetsAt"
+            ],
+            "usage.monthly": [
+                "status",
+                "percent",
+                "resetsAt"
             ],
             "*": [
                 "type",
@@ -465,21 +477,19 @@ public enum JSONShapeFormatter {
         allowRootWildcardFallback: true,
         enumValuesByPath: [
             "*.type": ["api", "oauth"],
-            "plan": ["free", "go", "zen", "pro", "team", "enterprise", "opencode-go", "opencode-zen", "Free", "Go", "Zen", "Pro", "Team", "Enterprise"]
+            "usage.rolling.status": ["ok", "rate-limited"],
+            "usage.weekly.status": ["ok", "rate-limited"],
+            "usage.monthly.status": ["ok", "rate-limited"]
         ],
         timestampPaths: [
-            "resets_at",
-            "resetsAt"
+            "usage.rolling.resetsAt",
+            "usage.weekly.resetsAt",
+            "usage.monthly.resetsAt"
         ],
         numericPaths: [
-            "used_usd",
-            "limit_usd",
-            "used",
-            "limit",
-            "remaining",
-            "percent_used",
-            "resets_at",
-            "resetsAt"
+            "usage.rolling.percent",
+            "usage.weekly.percent",
+            "usage.monthly.percent"
         ]
     )
 

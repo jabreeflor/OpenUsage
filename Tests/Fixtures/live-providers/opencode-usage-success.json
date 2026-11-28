@@ -1,6 +1,19 @@
 {
-  "plan": "Zen",
-  "used_usd": 8.40,
-  "limit_usd": 20.0,
-  "resets_at": "2026-12-01T00:00:00Z"
+  "usage": {
+    "rolling": {
+      "status": "ok",
+      "percent": 30,
+      "resetsAt": "2026-11-26T21:00:00.000Z"
+    },
+    "weekly": {
+      "status": "rate-limited",
+      "percent": 100,
+      "resetsAt": "2026-11-30T00:00:00.000Z"
+    },
+    "monthly": {
+      "status": "ok",
+      "percent": 50,
+      "resetsAt": "2026-12-01T00:00:00.000Z"
+    }
+  }
 }

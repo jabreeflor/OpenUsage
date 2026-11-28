@@ -229,15 +229,29 @@ public enum DemoFixtures {
         case (.opencode, .all):
             return ProviderSnapshot(
                 provider: .opencode,
-                plan: "Zen",
+                plan: "Go",
                 connectionState: .connected,
                 limits: [
                     UsageLimit(
-                        id: "opencode-credit",
-                        name: "Credit used",
-                        shortName: "Credit used",
+                        id: "opencode-rolling",
+                        name: "5-hour",
+                        shortName: "5-hour",
+                        percentUsed: 24,
+                        resetText: "Resets in 3h 18m"
+                    ),
+                    UsageLimit(
+                        id: "opencode-weekly",
+                        name: "Weekly",
+                        shortName: "Weekly",
                         percentUsed: 42,
-                        resetText: "$8.40 of $20 this month"
+                        resetText: "Resets Mon 12:00 AM"
+                    ),
+                    UsageLimit(
+                        id: "opencode-monthly",
+                        name: "Monthly",
+                        shortName: "Monthly",
+                        percentUsed: 31,
+                        resetText: "Resets Dec 1"
                     )
                 ],
                 connectedVia: "Signed in with OpenCode",
